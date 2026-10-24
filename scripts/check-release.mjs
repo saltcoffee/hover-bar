@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { extractReleaseNotes } from './release-notes.mjs';
 
 const readJSON = async file => JSON.parse(await readFile(file, 'utf8'));
 const manifest = await readJSON('manifest.json');
@@ -16,6 +17,7 @@ assert.equal(versions[manifest.version], manifest.minAppVersion);
 assert.equal(manifest.id, 'hover-bar');
 assert.equal(manifest.isDesktopOnly, true);
 assert.ok(manifest.description.length <= 250 && manifest.description.endsWith('.'));
+extractReleaseNotes(await readFile('CHANGELOG.md', 'utf8'), manifest.version);
 const requested = process.argv.indexOf('--version');
 let tree;
 if (requested !== -1) {

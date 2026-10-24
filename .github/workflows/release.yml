@@ -30,9 +30,13 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: npm run check:release -- --version "$RELEASE_VERSION"
+      - name: Prepare changelog content
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: node scripts/release-notes.mjs "$RELEASE_VERSION" "$RUNNER_TEMP/release-notes.md"
       - name: Publish release with installation files
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_VERSION: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_VERSION" main.js manifest.json styles.css --verify-tag --title "$RELEASE_VERSION" --generate-notes
+        run: gh release create "$RELEASE_VERSION" main.js manifest.json styles.css --verify-tag --title "$RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
