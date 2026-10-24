@@ -42,6 +42,7 @@ beforeEach(() => {
   json('package.json', { version: '0.1.0' });
   json('package-lock.json', { version: '0.1.0', packages: { '': { version: '0.1.0' } } });
   json('versions.json', { '0.1.0': '1.14.4' });
+  fixture.files.set('CHANGELOG.md', '## 0.1.0\n\n- Initial release.\n');
   fixture.tree = [...fixture.files.keys()].filter(file => file !== 'main.js');
   fixture.head = fixture.tag = '1'.repeat(40);
   fixture.trackedDocs = '';
@@ -74,6 +75,10 @@ describe('release validation', () => {
   it('rejects a missing required stylesheet', async () => {
     fixture.files.delete('styles.css');
     await expect(check()).rejects.toThrow('Missing file: styles.css');
+  });
+  it('rejects publication without changelog content for the current version', async () => {
+    fixture.files.set('CHANGELOG.md', '## 0.0.9\n\n- Older release.\n');
+    await expect(check()).rejects.toThrow('exactly one section for 0.1.0');
   });
   it('rejects local development documents in a release tag', async () => {
     fixture.tree.push('docs/DEVELOPMENT.md');

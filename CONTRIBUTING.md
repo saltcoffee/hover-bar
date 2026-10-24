@@ -38,14 +38,16 @@ For editor changes, report the exact Obsidian version, OS, editing mode, and man
 
 Use a descriptive branch name such as `feat/selection-toolbar` or `docs/color-behavior`; do not use a `codex` prefix. Use [Conventional Commits](https://www.conventionalcommits.org/) when submitting your own commits, for example `docs: define selection toolbar behavior`.
 
+Changes to `main` must go through a pull request, including changes by maintainers. Do not push directly to `main`.
+
 Pull requests should explain the user-visible problem, resulting behavior, verification, and remaining limits. Update usage documentation when behavior changes. The maintainer controls commits to the main branch, version tags, and marketplace submission; automation must not commit or push without explicit authorization.
 
 ## Releases
 
-Update `manifest.json`, `package.json`, and both root version fields in `package-lock.json` to the same version. Add the corresponding minimum Obsidian version to `versions.json`, and update `CHANGELOG.md`. Run `npm run check` before tagging the committed release.
+Update `manifest.json`, `package.json`, and both root version fields in `package-lock.json` to the same version. Add the corresponding minimum Obsidian version to `versions.json`. Write the release descriptions directly under a matching `## x.y.z` section in `CHANGELOG.md`, using `###` for subsections. Each version must have one non-empty section. Run `npm run check` before tagging the committed release.
 
 Pushing a version tag such as `0.1.0` to GitHub triggers the release workflow. Use the exact `manifest.json` version without a `v` prefix. The tagged commit must contain the workflow and all release sources; creating a local tag alone does not trigger GitHub Actions.
 
-The workflow installs locked dependencies, runs all checks, builds the tagged code, validates version alignment, and publishes a GitHub Release with `main.js`, `manifest.json`, and `styles.css` attached separately. GitHub supplies the additional source ZIP and tar.gz downloads. The workflow does not create commits or push tags. A failed check prevents publication, and existing releases are not overwritten.
+The workflow installs locked dependencies, runs all checks, builds the tagged code, validates version alignment, and publishes a GitHub Release with `main.js`, `manifest.json`, and `styles.css` attached separately. Its description contains the matching CHANGELOG section, without an automatically generated compare or commit-history link. GitHub supplies the additional source ZIP and tar.gz downloads. The workflow does not create commits or push tags. A failed check prevents publication, and existing releases are not overwritten.
 
 Contributions are licensed under the repository's [MIT license](LICENSE). Do not include material you do not have permission to contribute.
