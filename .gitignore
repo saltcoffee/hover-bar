@@ -1,0 +1,52 @@
+# Dependencies and package-manager caches. Commit package-lock.json.
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+
+# Generated bundles. Keep authored styles.css and manifest.json in Git.
+/main.js
+/main.js.map
+/dist/
+/build/
+/release/
+*.tsbuildinfo
+
+# Test and analysis output.
+/coverage/
+/playwright-report/
+/test-results/
+/output/playwright/
+/.cache/
+/tmp/
+
+# Local Obsidian vaults and plugin state; keep synthetic fixtures in tests/.
+/test-vault/
+/dev-vault/
+**/.obsidian/
+/data.json
+
+# Local configuration and secrets. Keep redacted examples versioned.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS and editor artifacts.
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+.idea/
+*.swp
+*.swo
+*~
+
+# Local product and development documents. Do not publish this directory.
+docs/

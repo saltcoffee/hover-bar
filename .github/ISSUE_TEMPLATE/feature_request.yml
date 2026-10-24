@@ -1,0 +1,23 @@
+name: Feature request / 功能建议
+description: Describe an editing task Hover Bar could make easier.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User task / 使用场景
+      description: What are you trying to do, and what makes it difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Expected result / 期望效果
+      description: Describe the interaction and the Markdown or HTML you expect to save.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround / 当前替代方案
+      description: Include any existing commands, workflows, or plugins you use.

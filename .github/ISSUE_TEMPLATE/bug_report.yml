@@ -1,0 +1,47 @@
+name: Bug report / 问题反馈
+description: Report a reproducible problem with Hover Bar.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include a minimal example and your editing mode. For document errors, put "documentation" in the version fields.
+        Please use synthetic examples and remove private notes, credentials, and sensitive logs.
+        请提供最小示例和编辑模式；文档问题可在版本字段填写 documentation。请勿上传私人笔记或敏感信息。
+  - type: input
+    id: obsidian_version
+    attributes:
+      label: Obsidian version / Obsidian 版本
+    validations:
+      required: true
+  - type: input
+    id: plugin_version
+    attributes:
+      label: Hover Bar version / 插件版本
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment / 运行环境
+      description: OS, editing mode, theme, and relevant community plugins.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and sample text / 复现步骤与示例
+      description: Include a minimal synthetic Markdown example and the exact selection.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior / 预期与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: isolation
+    attributes:
+      label: Additional checks / 补充检查
+      description: Does this reproduce with other community plugins disabled? Include redacted screenshots if helpful.
