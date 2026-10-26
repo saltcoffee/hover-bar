@@ -2,6 +2,23 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.2 — 2026-10-26
+
+### Added
+
+- Mobile support with automatic touch selection, a swipeable bottom toolbar, 44-pixel touch targets, and a close button.
+- Scrollable color and note panels that adapt to the on-screen keyboard and visual viewport.
+
+### Changed
+
+- Allow installation on iOS and Android alongside desktop Obsidian.
+- Update English and Chinese usage guides and automatic-toolbar preference text for touch screens.
+
+### Fixed
+
+- Keep the toolbar open when switching from note search to colors or more formatting on touch screens.
+- Preserve the native copy/paste menu in note search without closing the picker.
+
 ## 0.1.1 — 2026-10-26
 
 ### Changed

@@ -2,6 +2,8 @@ import { setIcon } from 'obsidian';
 import type { Translate, TextKey } from '../i18n';
 import type { ColorKind, FormatAction, Fragment } from '../formatting/types';
 import { PALETTE } from '../formatting/colors';
+import type { Box } from './position';
+import { enableTouchActions } from './touch';
 
 export interface NoteChoice { readonly path: string; readonly name: string; readonly disabled?: boolean }
 export interface ToolbarActions {
@@ -31,6 +33,9 @@ export class Toolbar {
   private returnTo: HTMLButtonElement | null = null;
   private queryId = 0;
   private compact = false;
+  private touch = false;
+  private constraints = '';
+  private dismiss: HTMLButtonElement;
 
   constructor(private readonly document: Document, private readonly t: Translate, private readonly actions: ToolbarActions) {
     this.root = document.createElement('div');
@@ -39,20 +44,28 @@ export class Toolbar {
     this.bar.setAttribute('role', 'toolbar'); this.bar.setAttribute('aria-label', t('toolbar'));
     this.panel = document.createElement('div'); this.panel.className = 'hover-bar-panel'; this.panel.hidden = true;
     this.root.append(this.bar, this.panel);
+    const strip = document.createElement('div'); strip.className = 'hover-bar-actions';
+    this.bar.append(strip);
     for (const [key, icon] of buttons) {
       const button = this.button(key, icon);
       button.dataset.action = key;
       if (['italic', 'code', 'highlight'].includes(key)) button.classList.add('hover-bar-secondary');
       if (key === 'foreground' || key === 'link') button.classList.add('hover-bar-group-start');
       button.addEventListener('click', () => this.activate(key, button));
-      this.controls.set(key, button); this.bar.append(button);
+      this.controls.set(key, button); strip.append(button);
     }
+    this.dismiss = this.button('close', 'x'); this.dismiss.hidden = true; this.dismiss.tabIndex = -1;
+    this.dismiss.addEventListener('click', () => this.actions.close()); this.bar.append(this.dismiss);
     this.root.addEventListener('pointerdown', event => {
       // Keep focus inside the toolbar until a button or note option handles its click.
       if (event.button === 0 && event.composedPath().some(node =>
         (node as Element).tagName === 'BUTTON' || (node as Element).getAttribute?.('role') === 'option')) event.preventDefault();
     });
     this.root.addEventListener('keydown', event => this.onKey(event));
+    this.root.addEventListener('contextmenu', event => {
+      if (!event.composedPath().some(node => (node as Element).tagName === 'INPUT')) event.preventDefault();
+    });
+    enableTouchActions(this.root);
     document.body.append(this.root);
   }
 
@@ -84,26 +97,40 @@ export class Toolbar {
     this.roving();
   }
 
-  show(compact: boolean): void {
-    this.compact = compact; this.root.classList.toggle('is-compact', compact);
+  show(compact: boolean, touch = false): void {
+    this.touch = touch; this.compact = compact && !touch;
+    this.root.classList.toggle('is-compact', this.compact); this.root.classList.toggle('is-touch', touch);
+    this.dismiss.hidden = !touch;
     this.root.hidden = false; this.root.classList.add('is-measuring'); this.roving();
+  }
+  constrain(bounds: Box): boolean {
+    const width = Math.max(0, bounds.right - bounds.left - 16);
+    const height = Math.max(0, bounds.bottom - bounds.top - 16);
+    const key = `${width}:${height}`;
+    if (key === this.constraints) return false;
+    this.constraints = key;
+    this.root.style.setProperty('--hover-bar-available-width', `${width}px`);
+    this.root.style.setProperty('--hover-bar-available-height', `${height}px`);
+    return true;
   }
   positioned(left: number, top: number): void {
     this.root.style.setProperty('--hover-bar-left', `${left}px`);
     this.root.style.setProperty('--hover-bar-top', `${top}px`);
     this.root.classList.remove('is-measuring');
   }
-  focus(): void { this.focusable(this.bar)[0]?.focus(); }
+  focus(): void { this.focusable(this.bar)[0]?.focus({ preventScroll: true }); }
   contains(event: Event): boolean { return event.composedPath().includes(this.root); }
   ownsFocus(): boolean { return this.root.contains(this.document.activeElement); }
   get visible(): boolean { return !this.root.hidden; }
+  get expanded(): boolean { return this.openPanel !== null; }
   hide(): void { this.closePanel(false); this.root.hidden = true; }
   destroy(): void { this.hide(); this.root.remove(); }
 
   private activate(key: TextKey, button: HTMLButtonElement): void {
     if (button.getAttribute('aria-disabled') === 'true') return;
     if (this.openPanel && !['foreground', 'background', 'more', 'chooseNote'].includes(key)) {
-      this.closePanel(false); button.focus();
+      const focus = !this.touch || this.ownsFocus();
+      this.closePanel(false); if (focus) button.focus({ preventScroll: true });
     }
     if (key === 'foreground' || key === 'background') this.palette(key, button);
     else if (key === 'more') this.more(button);
@@ -114,6 +141,8 @@ export class Toolbar {
 
   private startPanel(key: TextKey, button: HTMLButtonElement): boolean {
     if (this.openPanel === key) { this.closePanel(true); return false; }
+    // Move focus before removing the old search input so focusout never sees an unowned session.
+    if (this.ownsFocus()) button.focus({ preventScroll: true });
     this.closePanel(false); this.openPanel = key; this.returnTo = button;
     this.panel.hidden = false; this.panel.replaceChildren();
     this.panel.setAttribute('role', key === 'chooseNote' ? 'dialog' : 'group');
@@ -123,12 +152,13 @@ export class Toolbar {
   }
 
   closePanel(restoreFocus: boolean): void {
+    const focus = !this.touch || this.ownsFocus();
     this.queryAbort?.abort(); this.queryAbort = null; this.queryId++;
     const returnTo = this.returnTo;
     this.openPanel = null; this.returnTo = null;
     this.panel.hidden = true; this.panel.replaceChildren();
     for (const button of this.controls.values()) button.setAttribute('aria-expanded', 'false');
-    if (restoreFocus) returnTo?.focus();
+    if (restoreFocus && focus) returnTo?.focus({ preventScroll: true });
     if (this.visible) this.actions.resize();
   }
 
@@ -152,7 +182,8 @@ export class Toolbar {
     const reset = this.button(kind === 'foreground' ? 'resetForeground' : 'resetBackground');
     reset.classList.add('hover-bar-menu-item');
     reset.addEventListener('click', () => { this.actions.format(kind); this.closePanel(true); });
-    this.panel.append(grid, reset); this.actions.resize(); grid.querySelector('button')?.focus();
+    this.panel.append(grid, reset); this.actions.resize();
+    if (!this.touch || this.ownsFocus()) grid.querySelector('button')?.focus({ preventScroll: true });
   }
 
   private more(button: HTMLButtonElement): void {
@@ -165,7 +196,8 @@ export class Toolbar {
       item.addEventListener('click', () => { if (!disabled) { this.actions.format(key); this.closePanel(true); } });
       this.panel.append(item);
     }
-    this.actions.resize(); this.focusable(this.panel)[0]?.focus();
+    this.actions.resize();
+    if (!this.touch || this.ownsFocus()) this.focusable(this.panel)[0]?.focus({ preventScroll: true });
   }
 
   notePicker(button = this.controls.get('chooseNote')!): void {
@@ -222,11 +254,11 @@ export class Toolbar {
         event.preventDefault(); const choice = choices[active]; if (choice && !choice.disabled) this.actions.selectNote(choice.path);
       }
     });
-    this.panel.append(input, list, hint); void search(); input.focus(); this.actions.resize();
+    this.panel.append(input, list, hint); void search(); input.focus({ preventScroll: true }); this.actions.resize();
   }
 
   private focusable(container: HTMLElement): HTMLButtonElement[] {
-    return [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-disabled') !== 'true' && !(this.compact && button.classList.contains('hover-bar-secondary') && button.getAttribute('aria-pressed') !== 'true'));
+    return [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => !button.hidden && button.getAttribute('aria-disabled') !== 'true' && !(this.compact && button.classList.contains('hover-bar-secondary') && button.getAttribute('aria-pressed') !== 'true'));
   }
   private roving(): void {
     const focusable = this.focusable(this.bar);
