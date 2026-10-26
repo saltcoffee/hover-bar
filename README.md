@@ -42,7 +42,7 @@ Click outside the toolbar or press Esc to close it. For keyboard access, use **S
 
 ## Compatibility and limitations
 
-Requires desktop Obsidian **1.14.4 or later**, in Live Preview or Source mode. Reading view and mobile selection menus are not supported.
+Requires desktop Obsidian **1.8.7 or later**, in Live Preview or Source mode. Reading view and mobile selection menus are not supported.
 
 Use a single text fragment within one logical line, including text in a heading, list item, or blockquote. Keep structural markers outside your selection. Complex mixed formatting, partial HTML spans, multiple selections, tables, code blocks, math, and frontmatter will not be rewritten. Unsupported actions explain their limitation.
 

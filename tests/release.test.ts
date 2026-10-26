@@ -38,10 +38,10 @@ beforeEach(() => {
   for (const file of ['main.js', 'styles.css', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README.zh-CN.md', 'CONTRIBUTING.md']) {
     fixture.files.set(file, 'Synthetic release fixture.');
   }
-  json('manifest.json', { id: 'hover-bar', version: '0.1.0', minAppVersion: '1.14.4', isDesktopOnly: true, description: 'Format selected text.' });
+  json('manifest.json', { id: 'hover-bar', version: '0.1.0', minAppVersion: '1.8.7', isDesktopOnly: true, description: 'Format selected text.' });
   json('package.json', { version: '0.1.0' });
   json('package-lock.json', { version: '0.1.0', packages: { '': { version: '0.1.0' } } });
-  json('versions.json', { '0.1.0': '1.14.4' });
+  json('versions.json', { '0.1.0': '1.8.7' });
   fixture.files.set('CHANGELOG.md', '## 0.1.0\n\n- Initial release.\n');
   fixture.tree = [...fixture.files.keys()].filter(file => file !== 'main.js');
   fixture.head = fixture.tag = '1'.repeat(40);
