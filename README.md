@@ -1,6 +1,6 @@
 # Hover Bar
 
-A lightweight, offline selection toolbar for formatting text in Obsidian without leaving your mouse or trackpad.
+A lightweight, offline selection toolbar for formatting text in Obsidian on desktop, phone, and tablet.
 
 [简体中文](README.zh-CN.md)
 
@@ -14,7 +14,8 @@ The toolbar appears when you finish selecting text. Ordinary formatting stays in
 
 ## Features
 
-- A compact floating toolbar near your selection, with viewport-aware placement.
+- A compact floating toolbar near your selection on desktop, with viewport-aware placement.
+- A bottom toolbar on touch screens, with swipeable actions, larger buttons, and keyboard-aware panels.
 - Bold, italic, strikethrough, inline code, and standard Obsidian highlights.
 - Named text and background color palettes, with controls to remove colors.
 - Quick `[[internal links]]` and a picker for existing notes.
@@ -26,10 +27,12 @@ The toolbar appears when you finish selecting text. Ordinary formatting stays in
 ## How to use
 
 1. Open a Markdown note in Live Preview or Source mode.
-2. Select a plain-text phrase using your mouse or trackpad.
+2. Select a plain-text phrase using your mouse or trackpad, or long-press and adjust the selection handles on a touch screen.
 3. Click a formatting button, or open a color palette and choose a color.
 
 Click outside the toolbar or press Esc to close it. For keyboard access, use **Show selection toolbar** in the command palette. You can assign your own hotkey in Obsidian's hotkey settings.
+
+On phones and tablets, the toolbar docks near the bottom of the editor, above the on-screen keyboard when it is open. Swipe the action row horizontally to reach all buttons, or tap **×** to close it. Color palettes and note search expand above the row; scroll the panel when space is limited. The system's copy/paste menu remains available. You can also open Hover Bar using **Show selection toolbar** in the command palette.
 
 | Action | Example saved in your note |
 | --- | --- |
@@ -42,7 +45,7 @@ Click outside the toolbar or press Esc to close it. For keyboard access, use **S
 
 ## Compatibility and limitations
 
-Requires desktop Obsidian **1.8.7 or later**, in Live Preview or Source mode. Reading view and mobile selection menus are not supported.
+Requires Obsidian **1.8.7 or later** on desktop, iOS, or Android, in Live Preview or Source mode. Reading view does not show the toolbar.
 
 Use a single text fragment within one logical line, including text in a heading, list item, or blockquote. Keep structural markers outside your selection. Complex mixed formatting, partial HTML spans, multiple selections, tables, code blocks, math, and frontmatter will not be rewritten. Unsupported actions explain their limitation.
 
@@ -66,7 +69,7 @@ When Hover Bar is available in the community directory:
 
 Open **Settings → Hover Bar** to control automatic display, Live Preview, Source mode, and automatic display after keyboard selection.
 
-Use **Hover Bar: Show selection toolbar** in the command palette to open the toolbar manually. **Hover Bar: Toggle automatic toolbar** turns mouse-triggered display on or off. Assign shortcuts in **Settings → Hotkeys** if you prefer; no default shortcuts are added.
+Use **Hover Bar: Show selection toolbar** in the command palette to open the toolbar manually. **Hover Bar: Toggle automatic toolbar** turns automatic display on or off. Assign shortcuts in **Settings → Hotkeys** if you prefer; no default shortcuts are added.
 
 The interface follows Obsidian's language setting: Chinese app languages use Simplified Chinese text, and every other language uses English. No separate language preference is needed.
 

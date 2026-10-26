@@ -1,13 +1,13 @@
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { undo, redo } from '@codemirror/commands';
-import { editorInfoField, editorLivePreviewField, type App, type TFile } from 'obsidian';
+import { editorInfoField, editorLivePreviewField, Platform, type App, type TFile } from 'obsidian';
 import type { Translate } from '../i18n';
 import { formatFragment } from '../formatting/markdown';
 import type { EditPlan, FormatAction } from '../formatting/types';
 import { linkPlan, safeLinkText } from '../links/wikilink';
 import { PreferencesStore } from '../settings/store';
 import { Toolbar, type NoteChoice } from '../ui/toolbar';
-import { place } from '../ui/position';
+import { place, placeTouch, viewportBounds } from '../ui/position';
 import { applyEdit, ownEdit } from './apply-edit';
 import { capture, sameSelection, type SelectionSnapshot } from './context';
 
@@ -22,6 +22,9 @@ export class EditorController {
   private current: SelectionSnapshot | null = null;
   private destroyed = false;
   private dragging = false;
+  private touch = Platform.isMobile;
+  private touchSelection = Platform.isMobile;
+  private keyboardInput = false;
   private applying = false;
   private focusRequested = false;
   private frame = 0;
@@ -54,6 +57,9 @@ export class EditorController {
       this.view.focus();
     });
     this.listen(view.dom, 'pointerdown', event => this.beginDrag(event as PointerEvent));
+    // Some mobile WebViews deliver native handle changes as plain `select` transactions.
+    this.listen(view.dom, 'touchstart', () => this.beginTouch());
+    this.listen(view.dom, 'keydown', () => { this.keyboardInput = true; });
     this.listen(view.dom, 'compositionstart', () => this.close(false));
     const checkFocus = () => queueMicrotask(() => {
       if (!this.destroyed && !this.view.hasFocus && !this.toolbar.ownsFocus()) this.close(false);
@@ -61,12 +67,21 @@ export class EditorController {
     this.listen(view.dom, 'focusout', checkFocus);
     this.listen(this.toolbar.root, 'focusout', checkFocus);
     this.listen(this.document, 'pointerdown', event => { if (!this.toolbar.contains(event)) this.close(false); }, true);
-    this.listen(this.document, 'contextmenu', () => this.close(false));
+    this.listen(this.document, 'contextmenu', event => {
+      if (this.toolbar.contains(event)) return;
+      if (this.touchSelection && event.composedPath().includes(view.dom)) {
+        if (this.host.store.value.automatic) this.schedule();
+      } else this.close(false);
+    });
     this.listen(this.document, 'keydown', event => {
       if ((event as KeyboardEvent).key === 'Escape' && !this.toolbar.ownsFocus()) this.close(false);
     });
     this.listen(this.window, 'blur', () => { this.stopDrag(); this.close(false); });
     this.listen(this.window, 'resize', () => this.measure());
+    if (this.window.visualViewport) {
+      this.listen(this.window.visualViewport, 'resize', () => this.measure());
+      this.listen(this.window.visualViewport, 'scroll', () => this.measure());
+    }
     this.listen(this.document, 'scroll', () => this.measure(), true);
     host.controllers.add(this);
   }
@@ -77,10 +92,15 @@ export class EditorController {
   }
 
   private beginDrag(event: PointerEvent): void {
-    if (event.button !== 0 || event.pointerType === 'touch') return;
+    if (event.pointerType === 'touch') { this.beginTouch(); return; }
+    this.touch = Platform.isMobile; this.touchSelection = false; this.keyboardInput = false;
+    if (event.button !== 0) return;
     this.dragging = true; this.dismissed = '';
     this.window.addEventListener('pointerup', this.endDrag, true);
     this.window.addEventListener('pointercancel', this.endDrag, true);
+  }
+  private beginTouch(): void {
+    this.stopDrag(); this.touch = true; this.touchSelection = true; this.keyboardInput = false; this.dismissed = '';
   }
   private endDrag = (event: Event): void => {
     const wasDragging = this.dragging;
@@ -104,7 +124,8 @@ export class EditorController {
       this.close(false);
       const pointer = update.transactions.some(transaction => transaction.isUserEvent('select.pointer'));
       const keyboard = this.host.store.value.keyboard && update.transactions.some(transaction => transaction.isUserEvent('select'));
-      if (this.host.store.value.automatic && !this.dragging && (pointer || keyboard)) this.schedule();
+      const touch = this.touchSelection && !this.keyboardInput && update.transactions.some(transaction => transaction.isUserEvent('select'));
+      if (this.host.store.value.automatic && !this.dragging && (pointer || keyboard || touch)) this.schedule();
     } else if (this.current && (update.geometryChanged || update.viewportChanged)) this.measure();
   }
 
@@ -125,7 +146,7 @@ export class EditorController {
     this.current = snapshot;
     this.focusRequested ||= manual;
     this.toolbar.update(snapshot.located.fragment);
-    this.toolbar.show(this.view.scrollDOM.clientWidth < 384);
+    this.toolbar.show(this.view.scrollDOM.clientWidth < 384, this.touch);
     this.observer.observe(this.toolbar.root);
     this.measure();
     return true;
@@ -236,16 +257,25 @@ export class EditorController {
         const pane = this.view.scrollDOM.getBoundingClientRect();
         const size = this.toolbar.root.getBoundingClientRect();
         if (!from || !to) return null;
-        const bounds = { left: Math.max(0, pane.left), right: Math.min(this.window.innerWidth, pane.right), top: Math.max(0, pane.top), bottom: Math.min(this.window.innerHeight, pane.bottom) };
+        const screen = viewportBounds(this.window.innerWidth, this.window.innerHeight, this.window.visualViewport);
+        const bounds = { left: Math.max(screen.left, pane.left), right: Math.min(screen.right, pane.right), top: Math.max(screen.top, pane.top), bottom: Math.min(screen.bottom, pane.bottom) };
         const head = this.current.anchor > this.current.head ? from : to;
-        if (head.top < bounds.top || head.bottom > bounds.bottom) return null;
+        const headVisible = head.top >= bounds.top && head.bottom <= bounds.bottom;
         const anchor = { left: head.left, right: head.right, top: Math.max(bounds.top, Math.min(from.top, to.top)), bottom: Math.min(bounds.bottom, Math.max(from.bottom, to.bottom)) };
-        return place(anchor, bounds, size.width, size.height);
+        // Searching can open the keyboard and scroll the original selection out of view.
+        const searching = this.touch && this.toolbar.ownsFocus();
+        const position = !headVisible && !searching ? null : this.touch
+          // Expanded touch panels act as bottom sheets in the keyboard-reduced viewport.
+          ? placeTouch(headVisible && !this.toolbar.expanded ? anchor : null, bounds, size.width, size.height)
+          : place(anchor, bounds, size.width, size.height);
+        return { bounds, position };
       },
-      write: position => {
+      write: result => {
         if (this.destroyed || !this.current) return;
+        if (result && this.touch && this.toolbar.constrain(result.bounds)) { this.measure(); return; }
         const focus = this.focusRequested;
         this.focusRequested = false;
+        const position = result?.position;
         if (!position) { this.close(false); if (focus) this.host.notify(this.host.t('noSpace')); }
         else { this.toolbar.positioned(position.left, position.top); if (focus) this.toolbar.focus(); }
       },

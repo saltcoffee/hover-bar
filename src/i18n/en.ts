@@ -15,7 +15,7 @@ export const en = {
   searchNotes: 'Search notes', noNotes: 'No matching notes. Try another search.',
   searching: 'Finding notes…', searchError: 'Notes could not be loaded. Try again.',
   searchHint: 'Showing up to 50 notes. Keep typing to narrow the results.', close: 'Close', back: 'Back',
-  automatic: 'Show toolbar automatically', automaticDesc: 'Show formatting actions after selecting text with a mouse or trackpad.',
+  automatic: 'Show toolbar automatically', automaticDesc: 'Show formatting actions after selecting text with a mouse, trackpad, or touch.',
   livePreview: 'Enable in Live Preview', livePreviewDesc: 'Allow the toolbar while editing in Live Preview.',
   sourceMode: 'Enable in Source mode', sourceModeDesc: 'Allow the toolbar while editing Markdown source.',
   keyboard: 'Show after keyboard selection', keyboardDesc: 'Also show automatically when extending a selection with the keyboard.',

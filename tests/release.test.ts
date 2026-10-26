@@ -38,7 +38,7 @@ beforeEach(() => {
   for (const file of ['main.js', 'styles.css', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README.zh-CN.md', 'CONTRIBUTING.md']) {
     fixture.files.set(file, 'Synthetic release fixture.');
   }
-  json('manifest.json', { id: 'hover-bar', version: '0.1.0', minAppVersion: '1.8.7', isDesktopOnly: true, description: 'Format selected text.' });
+  json('manifest.json', { id: 'hover-bar', version: '0.1.0', minAppVersion: '1.8.7', isDesktopOnly: false, description: 'Format selected text.' });
   json('package.json', { version: '0.1.0' });
   json('package-lock.json', { version: '0.1.0', packages: { '': { version: '0.1.0' } } });
   json('versions.json', { '0.1.0': '1.8.7' });
@@ -55,6 +55,11 @@ afterEach(() => {
 describe('release validation', () => {
   it('accepts complete installation files built from the exact version tag', async () => {
     await expect(check()).resolves.toBeDefined();
+  });
+  it('rejects accidentally disabling mobile installation', async () => {
+    const manifest = JSON.parse(fixture.files.get('manifest.json')!);
+    json('manifest.json', { ...manifest, isDesktopOnly: true });
+    await expect(check()).rejects.toThrow('Hover Bar must remain available on mobile');
   });
   it.each(['v0.1.0', '0.2.0'])('rejects a mismatched tag %s', async version => {
     process.argv[3] = version;

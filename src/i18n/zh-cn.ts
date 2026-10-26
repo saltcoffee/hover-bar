@@ -16,7 +16,7 @@ export const zhCN: Strings = {
   noNotes: '没有找到匹配的笔记，请调整搜索内容。', searchHint: '最多显示 50 篇笔记，可继续输入以缩小范围。',
   searching: '正在查找笔记…', searchError: '无法读取笔记列表，请重试。',
   close: '关闭', back: '返回', automatic: '自动显示工具条',
-  automaticDesc: '使用鼠标或触控板选中文字后显示排版操作。', livePreview: '在实时预览中启用',
+  automaticDesc: '使用鼠标、触控板或触摸屏选中文字后显示排版操作。', livePreview: '在实时预览中启用',
   livePreviewDesc: '在实时预览编辑模式中使用工具条。', sourceMode: '在源码模式中启用',
   sourceModeDesc: '在编辑 Markdown 源码时使用工具条。', keyboard: '键盘选择后自动显示',
   keyboardDesc: '使用键盘扩展选区时也自动显示工具条。', reset: '重置偏好',

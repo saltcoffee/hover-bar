@@ -15,7 +15,7 @@ assert.equal(lock.version, manifest.version, 'Lockfile version must match the ma
 assert.equal(lock.packages?.['']?.version, manifest.version, 'Lockfile root package must match the manifest');
 assert.equal(versions[manifest.version], manifest.minAppVersion);
 assert.equal(manifest.id, 'hover-bar');
-assert.equal(manifest.isDesktopOnly, true);
+assert.equal(manifest.isDesktopOnly, false, 'Hover Bar must remain available on mobile');
 assert.ok(manifest.description.length <= 250 && manifest.description.endsWith('.'));
 extractReleaseNotes(await readFile('CHANGELOG.md', 'utf8'), manifest.version);
 const requested = process.argv.indexOf('--version');
