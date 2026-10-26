@@ -2,6 +2,17 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.1 — 2026-10-26
+
+### Changed
+
+- Lower the minimum supported desktop Obsidian version to 1.8.7 after host compatibility validation.
+- Use each version's changelog section for GitHub release notes.
+
+### Fixed
+
+- Keep the note picker focused when clicking a result so the selected link is inserted before the picker closes.
+
 ## 0.1.0 — 2026-10-24
 
 ### Added

@@ -48,7 +48,9 @@ export class Toolbar {
       this.controls.set(key, button); this.bar.append(button);
     }
     this.root.addEventListener('pointerdown', event => {
-      if (event.button === 0 && event.composedPath().some(node => (node as HTMLElement).tagName === 'BUTTON')) event.preventDefault();
+      // Keep focus inside the toolbar until a button or note option handles its click.
+      if (event.button === 0 && event.composedPath().some(node =>
+        (node as Element).tagName === 'BUTTON' || (node as Element).getAttribute?.('role') === 'option')) event.preventDefault();
     });
     this.root.addEventListener('keydown', event => this.onKey(event));
     document.body.append(this.root);

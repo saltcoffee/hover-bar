@@ -1,8 +1,8 @@
 {
   "id": "hover-bar",
   "name": "Hover Bar",
-  "version": "0.1.0",
-  "minAppVersion": "1.14.4",
+  "version": "0.1.1",
+  "minAppVersion": "1.8.7",
   "description": "Format selected text with a floating toolbar, text colors, highlights, and internal links.",
   "author": "gua",
   "authorUrl": "https://github.com/saltcoffee",

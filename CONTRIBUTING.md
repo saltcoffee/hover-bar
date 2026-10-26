@@ -8,6 +8,8 @@ Use Node.js 24, run `npm ci`, then `npm run dev` for a watch build. Start with t
 
 For a production build, run `npm ci` followed by `npm run build`. These developer instructions belong here; the README is written for users installing from Obsidian's community directory.
 
+Obsidian API types are pinned to the minimum supported app version, currently 1.8.7, so type checking catches newer API usage. Verify editor changes in the minimum supported Obsidian app as well as running the automated checks.
+
 ## Report a problem
 
 Include the Obsidian and plugin versions, OS, editing mode, theme, a small synthetic Markdown example, reproduction steps, and expected versus actual results. Explain whether the problem reproduces with other community plugins disabled. Never attach private notes, vaults, credentials, or unredacted logs.
