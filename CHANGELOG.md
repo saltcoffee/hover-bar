@@ -2,6 +2,12 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## Unreleased
+
+### Fixed
+
+- Upgrade the Obsidian development SDK's transitive Moment dependency to 2.31.0 to fix CVE-2026-17495.
+
 ## 0.1.2 — 2026-10-26
 
 ### Added
