@@ -1,29 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { App, TFile } from 'obsidian';
+import type { App, MarkdownFileInfo, TFile } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
-import { Platform } from './support/obsidian';
 import { EditorController } from '../src/editor/controller';
-import type { SelectionSnapshot } from '../src/editor/context';
+import { editorInfoField } from './support/obsidian';
+import type { CaptureResult, SelectionSnapshot } from '../src/editor/context';
 import { locateFragment } from '../src/formatting/fragment';
 import { PreferencesStore } from '../src/settings/store';
 import type { Box, Position } from '../src/ui/position';
 
-const scenario = vi.hoisted(() => ({ snapshot: undefined as SelectionSnapshot | undefined, resize: () => {} }));
+const scenario = vi.hoisted(() => ({ snapshot: undefined as SelectionSnapshot | undefined, blocked: undefined as CaptureResult | undefined, matches: true, resize: () => {} }));
 vi.mock('../src/editor/context', async importOriginal => ({
   ...await importOriginal<typeof import('../src/editor/context')>(),
-  capture: () => scenario.snapshot,
+  capture: () => scenario.blocked ?? { kind: 'ready', snapshot: scenario.snapshot },
+  matchesSnapshot: () => scenario.matches,
 }));
 vi.mock('../src/ui/toolbar', () => ({
   Toolbar: class {
     root = Object.assign(new EventTarget(), { getBoundingClientRect: () => ({ width: 352, height: 42 }) });
     visible = false;
-    expanded = false;
     update = vi.fn();
     focus = vi.fn();
     positioned = vi.fn();
-    constrain = vi.fn(() => false);
     contains = vi.fn();
     ownsFocus = vi.fn(() => false);
     destroy = vi.fn();
@@ -32,11 +31,9 @@ vi.mock('../src/ui/toolbar', () => ({
   },
 }));
 
-type Layout = { bounds: Box; position: Position | null } | null;
-interface Measurement { key: unknown; read(): Layout; write(position: Layout): void }
+interface Measurement { key: unknown; read(): Position | null; write(position: Position | null): void }
 
-function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, end: Box = { left: 180, right: 180, top: 100, bottom: 120 }, reverse = false, mobile = false) {
-  Platform.isMobile = mobile;
+function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, end: Box = { left: 180, right: 180, top: 100, bottom: 120 }, reverse = false) {
   const frames = new Map<number, FrameRequestCallback>(); let frameId = 0;
   const viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 600, height: 500 });
   const window = Object.assign(new EventTarget(), { innerWidth: 600, innerHeight: 500, visualViewport: viewport,
@@ -46,17 +43,19 @@ function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, en
   const document = Object.assign(new EventTarget(), { defaultView: window });
   const dom = Object.assign(new EventTarget(), { ownerDocument: document, isConnected: true });
   const requests = new Map<unknown, Measurement>();
+  const file = { path: 'test.md' } as TFile;
+  const state = EditorState.create({ doc: '          word', extensions: [editorInfoField.init(() => ({ file }) as MarkdownFileInfo)] });
   const view = {
-    dom, hasFocus: true,
+    state, dom, hasFocus: true, focus: vi.fn(),
     scrollDOM: { clientWidth: 600, getBoundingClientRect: () => ({ left: 0, right: 600, top: 0, bottom: 500 }) },
     coordsAtPos: (position: number) => position === 10 ? start : end,
     // CodeMirror replaces an earlier pending measurement with the same key.
     requestMeasure: (request: Measurement) => requests.set(request.key, request),
   } as unknown as EditorView;
   scenario.snapshot = {
-    file: { path: 'test.md' } as TFile, path: 'test.md', revision: 0,
+    file, path: 'test.md', revision: 0,
     anchor: reverse ? 14 : 10, head: reverse ? 10 : 14, base: 0,
-    source: 'word', located: locateFragment('word', 0, 4)!,
+    lineLength: 14, source: 'word', located: locateFragment('word', 0, 4)!,
   };
   const notify = vi.fn();
   const store = new PreferencesStore({ load: async () => null, save: async () => {} });
@@ -66,17 +65,18 @@ function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, en
     const pending = [...requests.values()]; requests.clear();
     for (const request of pending) request.write(request.read());
   };
-  return { controller, toolbar: controller['toolbar'], flush, notify, viewport, dom, document, store };
+  return { controller, toolbar: controller['toolbar'], flush, requests, notify, viewport, dom, document, window, view, store };
 }
 
 beforeEach(() => {
+  scenario.blocked = undefined; scenario.matches = true;
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { scenario.resize = callback; }
     observe() {}
     disconnect() {}
   });
 });
-afterEach(() => { vi.unstubAllGlobals(); Platform.isMobile = false; });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('selection toolbar focus and placement', () => {
   it('preserves a manual focus request when resize measurement replaces it, then focuses only once', () => {
@@ -103,7 +103,7 @@ describe('selection toolbar focus and placement', () => {
   });
   it('discards a pending focus request when the selection is closed before layout', () => {
     const { controller, toolbar, flush } = setup();
-    controller.show(true); controller.close(false); flush();
+    controller.show(true); controller.close('stale'); flush();
     expect(toolbar.focus).not.toHaveBeenCalled();
     expect(toolbar.visible).toBe(false);
     controller.destroy();
@@ -136,9 +136,9 @@ function select(userEvent?: string): ViewUpdate {
   return { startState: state, state: transaction.state, transactions: [transaction], selectionSet: true, docChanged: false } as unknown as ViewUpdate;
 }
 
-describe('touch selection lifecycle', () => {
-  it.each([false, true])('keeps native context menus inside the toolbar without closing the session (mobile=%s)', mobile => {
-    const { controller, toolbar, flush, document } = setup(undefined, undefined, false, mobile);
+describe('desktop selection lifecycle', () => {
+  it('keeps native context menus inside the toolbar without closing the session', () => {
+    const { controller, toolbar, flush, document } = setup();
     controller.show(false); flush();
     vi.mocked(toolbar.contains).mockReturnValue(true);
     const menu = new Event('contextmenu', { cancelable: true }); document.dispatchEvent(menu);
@@ -150,76 +150,131 @@ describe('touch selection lifecycle', () => {
     controller.show(false); flush(); document.dispatchEvent(new Event('contextmenu'));
     expect(toolbar.visible).toBe(false); controller.destroy();
   });
-  it('shows for native mobile select transactions without enabling keyboard selection', () => {
-    const { controller, toolbar, flush } = setup(undefined, undefined, false, true);
-    controller.update(select('select')); flush();
-    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith(false, true);
+  it('shows after a pointer selection without stealing editor focus', () => {
+    const { controller, toolbar, flush } = setup();
+    controller.update(select('select.pointer')); flush();
+    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith(false);
     expect(toolbar.focus).not.toHaveBeenCalled();
     controller.destroy();
   });
-  it('recognizes touch on desktop tablets and preserves native context menus', () => {
-    const { controller, toolbar, flush, dom, document } = setup();
-    dom.dispatchEvent(Object.assign(new Event('pointerdown'), { pointerType: 'touch', button: 0 }));
-    controller.update(select('select')); flush();
-    expect(toolbar.show).toHaveBeenCalledWith(false, true);
-    const menu = new Event('contextmenu', { cancelable: true });
-    menu.composedPath = () => [dom, document]; document.dispatchEvent(menu); flush();
-    expect(menu.defaultPrevented).toBe(false); expect(toolbar.visible).toBe(true);
+  it('waits for a mouse drag to finish before showing the toolbar', () => {
+    const { controller, toolbar, flush, dom, window } = setup();
+    dom.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0 }));
+    controller.update(select('select.pointer')); flush(); expect(toolbar.visible).toBe(false);
+    window.dispatchEvent(new Event('pointerup')); flush();
+    expect(toolbar.visible).toBe(true); expect(toolbar.focus).not.toHaveBeenCalled();
     controller.destroy();
   });
-  it('still honors automatic and hardware-keyboard preferences on mobile', async () => {
-    const { controller, toolbar, flush, dom, store } = setup(undefined, undefined, false, true);
+  it('does not show after a cancelled mouse drag', () => {
+    const { controller, toolbar, flush, dom, window } = setup();
+    dom.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0 }));
+    controller.update(select('select.pointer'));
+    window.dispatchEvent(new Event('pointercancel')); flush();
+    expect(toolbar.visible).toBe(false); controller.destroy();
+  });
+  it('honors the keyboard selection preference', async () => {
+    const { controller, toolbar, flush, store } = setup();
     await store.load();
-    dom.dispatchEvent(new Event('keydown')); controller.update(select('select')); flush();
+    controller.update(select('select')); flush();
     expect(toolbar.visible).toBe(false);
     await store.set('keyboard', true); controller.update(select('select')); flush();
     expect(toolbar.visible).toBe(true);
-    controller.close(false); await store.set('automatic', false);
-    dom.dispatchEvent(new Event('touchstart')); controller.update(select('select')); flush();
+    controller.destroy();
+  });
+  it('keeps manual access when automatic display is disabled', async () => {
+    const { controller, toolbar, flush, dom, window, store } = setup();
+    await store.load(); await store.set('automatic', false); await store.set('keyboard', true);
+    controller.update(select('select')); flush(); expect(toolbar.visible).toBe(false);
+    dom.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0 }));
+    controller.update(select('select.pointer')); window.dispatchEvent(new Event('pointerup')); flush();
+    expect(toolbar.visible).toBe(false);
+    controller.show(true); flush(); expect(toolbar.visible).toBe(true);
+    expect(toolbar.focus).toHaveBeenCalledTimes(1);
+    controller.destroy();
+  });
+  it('ignores programmatic selections even with keyboard selection enabled', async () => {
+    const { controller, toolbar, flush, store } = setup();
+    await store.load(); await store.set('keyboard', true);
+    controller.update(select()); flush(); expect(toolbar.visible).toBe(false);
+    controller.destroy();
+  });
+  it('uses the compact toolbar in a narrow desktop pane', () => {
+    const { controller, toolbar, flush, view } = setup();
+    Object.defineProperty(view.scrollDOM, 'clientWidth', { value: 380 });
+    controller.show(false); flush();
+    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith(true);
+    controller.destroy();
+  });
+  it('repositions on viewport changes and closes when the selection leaves view', () => {
+    const { controller, toolbar, viewport, flush } = setup();
+    controller.show(false); flush(); expect(toolbar.positioned).toHaveBeenLastCalledWith(8, 50);
+    viewport.offsetTop = 80; viewport.height = 420; viewport.dispatchEvent(new Event('scroll')); flush();
+    expect(toolbar.positioned).toHaveBeenLastCalledWith(8, 128);
+    viewport.height = 30; viewport.dispatchEvent(new Event('resize')); flush();
     expect(toolbar.visible).toBe(false);
     controller.destroy();
   });
-  it('ignores programmatic selections and keeps desktop keyboard behavior unchanged', () => {
-    for (const mobile of [false, true]) {
-      const { controller, toolbar, flush } = setup(undefined, undefined, false, mobile);
-      controller.update(select()); flush(); expect(toolbar.visible).toBe(false);
-      if (!mobile) { controller.update(select('select')); flush(); expect(toolbar.visible).toBe(false); }
-      controller.destroy();
+});
+
+describe('diagnosis, cancellation and focus return', () => {
+  it.each([
+    [{ kind: 'readOnly' }, 'readOnly'], [{ kind: 'composing' }, 'composing'],
+    [{ kind: 'multipleSelections' }, 'multipleSelections'], [{ kind: 'emptySelection' }, 'emptySelection'],
+    [{ kind: 'multipleLines' }, 'multipleLines'], [{ kind: 'syntaxPending' }, 'syntaxPending'],
+    [{ kind: 'protectedSyntax' }, 'protectedSyntax'], [{ kind: 'unsupportedFragment' }, 'unsupported'],
+    [{ kind: 'tooLong', stage: 'line' }, 'tooLong'], [{ kind: 'modeDisabled', mode: 'source' }, 'modeDisabled'],
+    [{ kind: 'preferences', status: 'conflict' }, 'settingsConflict'],
+  ] as const)('keeps automatic rejection silent and reports one manual reason: %s', (reason, key) => {
+    const { controller, flush, notify, toolbar } = setup();
+    scenario.blocked = { kind: 'blocked', reason };
+    expect(controller.show(false)).toBe(false); flush(); expect(notify).not.toHaveBeenCalled();
+    expect(controller.show(true)).toBe(false); flush();
+    expect(notify).toHaveBeenCalledExactlyOnceWith(key); expect(toolbar.visible).toBe(false);
+    controller.destroy();
+  });
+  it('prioritizes a stale identity over a new formatting restriction on execution', () => {
+    const { controller, flush, notify } = setup(); controller.show(true); flush();
+    scenario.matches = false; scenario.blocked = { kind: 'blocked', reason: { kind: 'readOnly' } };
+    controller['format']('bold'); expect(notify).toHaveBeenCalledExactlyOnceWith('stale');
+    controller.destroy();
+  });
+  it('reports a current restriction when the active document and selection still match', () => {
+    const { controller, flush, notify } = setup(); controller.show(true); flush();
+    scenario.blocked = { kind: 'blocked', reason: { kind: 'composing' } };
+    controller['format']('bold'); expect(notify).toHaveBeenCalledExactlyOnceWith('composing'); controller.destroy();
+  });
+  it.each(['dismiss', 'linkApplied'] as const)('returns focus after clearing the write snapshot: %s', reason => {
+    const { controller, toolbar, flush, view } = setup(); controller.show(true); flush();
+    vi.mocked(toolbar.ownsFocus).mockReturnValue(true); Object.defineProperty(view, 'hasFocus', { value: false });
+    scenario.blocked = { kind: 'blocked', reason: { kind: 'protectedSyntax' } };
+    controller.close(reason);
+    expect(controller['current']).toBeNull(); expect(view.focus).toHaveBeenCalledTimes(1);
+    controller.close(reason); expect(view.focus).toHaveBeenCalledTimes(1); controller.destroy();
+  });
+  it.each(['outside', 'windowBlur', 'modeChanged', 'failed', 'destroy'] as const)('does not steal focus for %s', reason => {
+    const { controller, toolbar, flush, view } = setup(); controller.show(true); flush();
+    vi.mocked(toolbar.ownsFocus).mockReturnValue(true); Object.defineProperty(view, 'hasFocus', { value: false });
+    controller.close(reason); expect(view.focus).not.toHaveBeenCalled(); controller.destroy();
+  });
+  it('does not restore focus to an editor whose file has changed or whose DOM is disconnected', () => {
+    for (const change of ['file', 'disconnected']) {
+      const { controller, toolbar, flush, view, dom } = setup(); controller.show(true); flush();
+      vi.mocked(toolbar.ownsFocus).mockReturnValue(true); Object.defineProperty(view, 'hasFocus', { value: false });
+      if (change === 'file') scenario.snapshot!.file.path = 'other.md'; else dom.isConnected = false;
+      controller.close('dismiss'); expect(view.focus).not.toHaveBeenCalled(); controller.destroy();
     }
   });
-  it('follows the visual viewport when the keyboard opens, pans and closes', () => {
-    const { controller, toolbar, viewport, flush } = setup(undefined, undefined, false, true);
-    controller.show(false); flush(); expect(toolbar.positioned).toHaveBeenLastCalledWith(124, 450);
-    viewport.height = 280; viewport.dispatchEvent(new Event('resize')); flush();
-    expect(toolbar.positioned).toHaveBeenLastCalledWith(124, 230);
-    viewport.offsetTop = 20; viewport.dispatchEvent(new Event('scroll')); flush();
-    expect(toolbar.positioned).toHaveBeenLastCalledWith(124, 250);
-    viewport.height = 480; viewport.dispatchEvent(new Event('resize')); flush();
-    expect(toolbar.positioned).toHaveBeenLastCalledWith(124, 450);
-    controller.destroy();
+  it('ignores an old measurement without consuming the new session focus request', () => {
+    const { controller, toolbar, requests, flush, notify } = setup(); controller.show(true);
+    const old = [...requests.values()][0]!; controller.close('stale');
+    scenario.snapshot = { ...scenario.snapshot!, revision: 1 }; controller.show(true);
+    old.write(old.read()); expect(toolbar.visible).toBe(true); expect(notify).not.toHaveBeenCalled();
+    flush(); expect(toolbar.focus).toHaveBeenCalledTimes(1); controller.destroy();
   });
-  it('remeasures constrained touch panels without losing a pending manual focus request', () => {
-    const { controller, toolbar, flush } = setup(undefined, undefined, false, true);
-    vi.mocked(toolbar.constrain).mockReturnValueOnce(true).mockReturnValue(false);
-    controller.show(true); flush(); expect(toolbar.focus).not.toHaveBeenCalled();
-    flush(); expect(toolbar.focus).toHaveBeenCalledTimes(1);
+  it('suppresses an explicitly dismissed selection until the user changes it', () => {
+    const { controller, toolbar, flush } = setup(); controller.show(false); flush(); controller.close('dismiss');
+    expect(controller.show(false)).toBe(false);
+    controller.update(select('select.pointer')); flush(); expect(toolbar.visible).toBe(true);
     controller.destroy();
-  });
-  it('keeps expanded panels docked when the visible selection leaves no room for a full palette', () => {
-    const { controller, toolbar, viewport, flush } = setup({ left: 100, right: 100, top: 100, bottom: 120 }, { left: 180, right: 180, top: 100, bottom: 120 }, false, true);
-    Object.defineProperty(toolbar, 'expanded', { value: true });
-    vi.spyOn(toolbar.root, 'getBoundingClientRect').mockReturnValue({ width: 352, height: 230 } as DOMRect);
-    viewport.height = 300; controller.show(false); flush();
-    expect(toolbar.visible).toBe(true); expect(toolbar.positioned).toHaveBeenLastCalledWith(124, 62);
-    controller.destroy();
-  });
-  it('keeps a focused search panel usable when the keyboard covers the original text', () => {
-    const { controller, toolbar, viewport, flush } = setup({ left: 100, right: 100, top: 400, bottom: 420 }, { left: 180, right: 180, top: 400, bottom: 420 }, false, true);
-    controller.show(false); flush();
-    vi.mocked(toolbar.ownsFocus).mockReturnValue(true);
-    viewport.height = 280; viewport.dispatchEvent(new Event('resize')); flush();
-    expect(toolbar.visible).toBe(true); expect(toolbar.positioned).toHaveBeenLastCalledWith(124, 230);
-    controller.destroy();
-    viewport.dispatchEvent(new Event('resize')); flush(); expect(toolbar.visible).toBe(false);
   });
 });

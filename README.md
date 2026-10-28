@@ -1,6 +1,6 @@
 # Hover Bar
 
-A lightweight, offline selection toolbar for formatting text in Obsidian on desktop, phone, and tablet.
+A lightweight, offline selection toolbar for formatting text in desktop Obsidian.
 
 [简体中文](README.zh-CN.md)
 
@@ -15,7 +15,6 @@ The toolbar appears when you finish selecting text. Ordinary formatting stays in
 ## Features
 
 - A compact floating toolbar near your selection on desktop, with viewport-aware placement.
-- A bottom toolbar on touch screens, with swipeable actions, larger buttons, and keyboard-aware panels.
 - Bold, italic, strikethrough, inline code, and standard Obsidian highlights.
 - Named text and background color palettes, with controls to remove colors.
 - Quick `[[internal links]]` and a picker for existing notes.
@@ -23,16 +22,15 @@ The toolbar appears when you finish selecting text. Ordinary formatting stays in
 - Light and dark theme support and keyboard navigation.
 - Chinese text when Obsidian uses a Chinese language setting; English for every other language.
 - Controls to disable automatic display while keeping a command to open the toolbar.
+- Specific feedback for read-only editors, disabled modes, multiple selections, line breaks, formatting conflicts, and length limits.
 
 ## How to use
 
 1. Open a Markdown note in Live Preview or Source mode.
-2. Select a plain-text phrase using your mouse or trackpad, or long-press and adjust the selection handles on a touch screen.
+2. Select a plain-text phrase using your mouse or trackpad.
 3. Click a formatting button, or open a color palette and choose a color.
 
 Click outside the toolbar or press Esc to close it. For keyboard access, use **Show selection toolbar** in the command palette. You can assign your own hotkey in Obsidian's hotkey settings.
-
-On phones and tablets, the toolbar docks near the bottom of the editor, above the on-screen keyboard when it is open. Swipe the action row horizontally to reach all buttons, or tap **×** to close it. Color palettes and note search expand above the row; scroll the panel when space is limited. The system's copy/paste menu remains available. You can also open Hover Bar using **Show selection toolbar** in the command palette.
 
 | Action | Example saved in your note |
 | --- | --- |
@@ -45,9 +43,11 @@ On phones and tablets, the toolbar docks near the bottom of the editor, above th
 
 ## Compatibility and limitations
 
-Requires Obsidian **1.8.7 or later** on desktop, iOS, or Android, in Live Preview or Source mode. Reading view does not show the toolbar.
+Requires desktop Obsidian **1.8.7 or later**, in Live Preview or Source mode. Mobile devices are not supported. Reading view does not show the toolbar.
 
 Use a single text fragment within one logical line, including text in a heading, list item, or blockquote. Keep structural markers outside your selection. Complex mixed formatting, partial HTML spans, multiple selections, tables, code blocks, math, and frontmatter will not be rewritten. Unsupported actions explain their limitation.
+
+Automatic selection quietly skips unsupported content. Open the toolbar manually or activate an unavailable action to learn why. Length protection checks the original selection, its full line, and the resulting line before writing. Select less text or split an overly long paragraph when needed.
 
 Custom colors are saved as inline HTML. They remain in the note after disabling the plugin, but their appearance depends on the renderer and theme. Export tools may strip styles. Source mode shows the underlying markup, and Live Preview may reveal it while editing. The internal-link action intentionally writes wikilinks.
 
@@ -72,6 +72,8 @@ Open **Settings → Hover Bar** to control automatic display, Live Preview, Sour
 Use **Hover Bar: Show selection toolbar** in the command palette to open the toolbar manually. **Hover Bar: Toggle automatic toolbar** turns automatic display on or off. Assign shortcuts in **Settings → Hotkeys** if you prefer; no default shortcuts are added.
 
 The interface follows Obsidian's language setting: Chinese app languages use Simplified Chinese text, and every other language uses English. No separate language preference is needed.
+
+After opening the toolbar manually, use arrow keys to browse actions, Enter or Space to activate, and Esc to close the panel and then the toolbar. Unavailable buttons remain accessible with arrow keys; activating one explains its limitation without editing the note. Enter used to finish text composition in note search does not insert a link.
 
 ## Privacy
 

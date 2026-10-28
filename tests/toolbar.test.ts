@@ -10,7 +10,7 @@ function panelSession(focused: boolean) {
   const editor = {};
   const body = {};
   const document = { activeElement: focused ? input : editor };
-  const button = { focus: vi.fn(() => { document.activeElement = button; }) };
+  const button = { isConnected: true, focus: vi.fn(() => { document.activeElement = button; }) };
   let attached = true;
   // Model the browser boundary: removing a focused input moves focus to the body.
   const panel = {
@@ -20,7 +20,7 @@ function panelSession(focused: boolean) {
   const toolbar = Object.create(Toolbar.prototype) as Toolbar;
   Object.assign(toolbar, {
     document, root: { hidden: false, contains: (node: unknown) => node === button || (attached && node === input) },
-    panel, openPanel: 'chooseNote', returnTo: null, touch: true, fragment: null,
+    panel, openPanel: 'chooseNote', returnTo: null, model: null,
     queryAbort: null, queryId: 0, controls: new Map(), t: (key: string) => key, actions: { resize: vi.fn() },
   });
   return { toolbar, document, button, editor };
@@ -34,7 +34,13 @@ describe('toolbar panel focus handoff', () => {
     expect(toolbar.ownsFocus()).toBe(true);
     expect(button.focus).toHaveBeenCalledWith({ preventScroll: true });
   });
-  it('does not steal editor focus when opening a touch panel without a focused search', () => {
+  it('restores focus to the panel trigger when closing with Escape', () => {
+    const { toolbar, document, button } = panelSession(true);
+    toolbar['startPanel']('foreground', button as unknown as HTMLButtonElement);
+    toolbar.closePanel(true);
+    expect(document.activeElement).toBe(button); expect(toolbar.ownsFocus()).toBe(true);
+  });
+  it('does not move editor focus during panel setup', () => {
     const { toolbar, document, button, editor } = panelSession(false);
     toolbar['startPanel']('foreground', button as unknown as HTMLButtonElement);
     expect(document.activeElement).toBe(editor); expect(button.focus).not.toHaveBeenCalled();

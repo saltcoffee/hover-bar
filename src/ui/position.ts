@@ -7,17 +7,6 @@ export function viewportBounds(width: number, height: number, viewport?: Pick<Vi
     : { left: 0, top: 0, right: width, bottom: height };
 }
 
-// Touch selection handles and the native edit menu stay near the text; dock away from them.
-export function placeTouch(anchor: Box | null, bounds: Box, width: number, height: number, gap = 8): Position | null {
-  if (width > bounds.right - bounds.left - gap * 2 || height > bounds.bottom - bounds.top - gap * 2) return null;
-  let top = bounds.bottom - height - gap;
-  if (anchor && top < anchor.bottom + 24) {
-    top = bounds.top + gap;
-    if (top + height > anchor.top - 24) return null;
-  }
-  return { left: bounds.left + (bounds.right - bounds.left - width) / 2, top };
-}
-
 export function place(anchor: Box, bounds: Box, width: number, height: number, gap = 8): Position | null {
   const leftEdge = bounds.left + gap;
   const rightEdge = bounds.right - gap;

@@ -1,15 +1,21 @@
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { undo, redo } from '@codemirror/commands';
-import { editorInfoField, editorLivePreviewField, Platform, type App, type TFile } from 'obsidian';
+import { editorInfoField, editorLivePreviewField, type App, type TFile } from 'obsidian';
 import type { Translate } from '../i18n';
-import { formatFragment } from '../formatting/markdown';
 import type { EditPlan, FormatAction } from '../formatting/types';
-import { linkPlan, safeLinkText } from '../links/wikilink';
 import { PreferencesStore } from '../settings/store';
-import { Toolbar, type NoteChoice } from '../ui/toolbar';
-import { place, placeTouch, viewportBounds } from '../ui/position';
+import { Toolbar } from '../ui/toolbar';
+import type { NoteChoice } from '../ui/toolbar-types';
+import { place, viewportBounds } from '../ui/position';
 import { applyEdit, ownEdit } from './apply-edit';
-import { capture, sameSelection, type SelectionSnapshot } from './context';
+import { capture, matchesSnapshot, type SelectionSnapshot } from './context';
+import { actionFeedback, selectionFeedback } from './feedback';
+import { formatSelection, linkSelection } from './selection-actions';
+import { toolbarModel } from './toolbar-model';
+
+export type CloseReason = 'dismiss' | 'linkApplied' | 'stale' | 'outside' | 'windowBlur' | 'modeChanged' | 'noSpace' | 'failed' | 'destroy';
+
+function selectionKey(snapshot: SelectionSnapshot): string { return `${snapshot.path}:${snapshot.revision}:${snapshot.anchor}:${snapshot.head}`; }
 
 export interface Host {
   app: App; store: PreferencesStore; t: Translate;
@@ -22,9 +28,6 @@ export class EditorController {
   private current: SelectionSnapshot | null = null;
   private destroyed = false;
   private dragging = false;
-  private touch = Platform.isMobile;
-  private touchSelection = Platform.isMobile;
-  private keyboardInput = false;
   private applying = false;
   private focusRequested = false;
   private frame = 0;
@@ -39,10 +42,10 @@ export class EditorController {
     this.document = view.dom.ownerDocument;
     this.window = this.document.defaultView!;
     this.toolbar = new Toolbar(this.document, host.t, {
-      available: (action, color) => !!this.current && formatFragment(this.current.located, this.current.source, action, color).kind !== 'unavailable',
+      explain: reason => { if (this.validate()) this.host.notify(reason); },
       format: (action, color) => this.format(action, color), quickLink: () => this.quickLink(),
       notes: (query, signal) => this.notes(query, signal), selectNote: path => this.selectNote(path),
-      close: () => this.close(true), resize: () => this.measure(),
+      close: () => this.close('dismiss'), resize: () => this.measure(),
     });
     this.observer = new ResizeObserver(() => this.measure());
     this.listen(this.toolbar.root, 'keydown', event => {
@@ -52,31 +55,25 @@ export class EditorController {
       if (lower !== 'z' && !(lower === 'y' && key.ctrlKey)) return;
       if (!this.validate()) return;
       key.preventDefault(); key.stopPropagation();
-      this.close(true);
+      this.close('dismiss');
       if (key.shiftKey || lower === 'y') redo(this.view); else undo(this.view);
-      this.view.focus();
+      if (!this.view.hasFocus) this.view.focus();
     });
     this.listen(view.dom, 'pointerdown', event => this.beginDrag(event as PointerEvent));
-    // Some mobile WebViews deliver native handle changes as plain `select` transactions.
-    this.listen(view.dom, 'touchstart', () => this.beginTouch());
-    this.listen(view.dom, 'keydown', () => { this.keyboardInput = true; });
-    this.listen(view.dom, 'compositionstart', () => this.close(false));
+    this.listen(view.dom, 'compositionstart', () => this.close('stale'));
     const checkFocus = () => queueMicrotask(() => {
-      if (!this.destroyed && !this.view.hasFocus && !this.toolbar.ownsFocus()) this.close(false);
+      if (!this.destroyed && !this.view.hasFocus && !this.toolbar.ownsFocus()) this.close('stale');
     });
     this.listen(view.dom, 'focusout', checkFocus);
     this.listen(this.toolbar.root, 'focusout', checkFocus);
-    this.listen(this.document, 'pointerdown', event => { if (!this.toolbar.contains(event)) this.close(false); }, true);
+    this.listen(this.document, 'pointerdown', event => { if (!this.toolbar.contains(event)) this.close('outside'); }, true);
     this.listen(this.document, 'contextmenu', event => {
-      if (this.toolbar.contains(event)) return;
-      if (this.touchSelection && event.composedPath().includes(view.dom)) {
-        if (this.host.store.value.automatic) this.schedule();
-      } else this.close(false);
+      if (!this.toolbar.contains(event)) this.close('outside');
     });
     this.listen(this.document, 'keydown', event => {
-      if ((event as KeyboardEvent).key === 'Escape' && !this.toolbar.ownsFocus()) this.close(false);
+      if ((event as KeyboardEvent).key === 'Escape' && !this.toolbar.ownsFocus()) this.close('stale');
     });
-    this.listen(this.window, 'blur', () => { this.stopDrag(); this.close(false); });
+    this.listen(this.window, 'blur', () => { this.stopDrag(); this.close('windowBlur'); });
     this.listen(this.window, 'resize', () => this.measure());
     if (this.window.visualViewport) {
       this.listen(this.window.visualViewport, 'resize', () => this.measure());
@@ -92,15 +89,10 @@ export class EditorController {
   }
 
   private beginDrag(event: PointerEvent): void {
-    if (event.pointerType === 'touch') { this.beginTouch(); return; }
-    this.touch = Platform.isMobile; this.touchSelection = false; this.keyboardInput = false;
     if (event.button !== 0) return;
     this.dragging = true; this.dismissed = '';
     this.window.addEventListener('pointerup', this.endDrag, true);
     this.window.addEventListener('pointercancel', this.endDrag, true);
-  }
-  private beginTouch(): void {
-    this.stopDrag(); this.touch = true; this.touchSelection = true; this.keyboardInput = false; this.dismissed = '';
   }
   private endDrag = (event: Event): void => {
     const wasDragging = this.dragging;
@@ -116,16 +108,16 @@ export class EditorController {
   update(update: ViewUpdate): void {
     if (this.destroyed) return;
     if (update.startState.field(editorLivePreviewField, false) !== update.state.field(editorLivePreviewField, false)) {
-      this.close(false); return;
+      this.close('modeChanged'); return;
     }
     const own = update.transactions.some(transaction => transaction.annotation(ownEdit));
-    if (update.docChanged && !own) { this.close(false); return; }
+    if (update.docChanged && !own) { this.close('stale'); return; }
     if (update.selectionSet && !own && !update.startState.selection.eq(update.state.selection)) {
-      this.close(false);
+      this.close('stale');
+      this.dismissed = '';
       const pointer = update.transactions.some(transaction => transaction.isUserEvent('select.pointer'));
       const keyboard = this.host.store.value.keyboard && update.transactions.some(transaction => transaction.isUserEvent('select'));
-      const touch = this.touchSelection && !this.keyboardInput && update.transactions.some(transaction => transaction.isUserEvent('select'));
-      if (this.host.store.value.automatic && !this.dragging && (pointer || keyboard || touch)) this.schedule();
+      if (this.host.store.value.automatic && !this.dragging && (pointer || keyboard)) this.schedule();
     } else if (this.current && (update.geometryChanged || update.viewportChanged)) this.measure();
   }
 
@@ -136,48 +128,55 @@ export class EditorController {
 
   show(manual: boolean): boolean {
     if (this.destroyed || (!manual && !this.view.hasFocus)) return false;
-    const snapshot = capture(this.view, this.host.app, this.host.store);
-    if (!snapshot) { if (manual) this.host.notify(this.host.t('unsupported')); return false; }
-    const key = `${snapshot.revision}:${snapshot.anchor}:${snapshot.head}`;
+    const result = capture(this.view, this.host.app, this.host.store);
+    if (result.kind === 'blocked') {
+      this.close('stale'); if (manual) this.host.notify(this.host.t(selectionFeedback(result.reason))); return false;
+    }
+    const snapshot = result.snapshot;
+    const key = selectionKey(snapshot);
     if (!manual && key === this.dismissed) return false;
     for (const controller of this.host.controllers) {
-      if (controller !== this && controller.document === this.document) controller.close(false);
+      if (controller !== this && controller.document === this.document) controller.close('outside');
     }
+    const continuing = this.current?.file === snapshot.file && selectionKey(this.current) === key;
+    this.focusRequested = manual || (continuing && this.focusRequested);
     this.current = snapshot;
-    this.focusRequested ||= manual;
-    this.toolbar.update(snapshot.located.fragment);
-    this.toolbar.show(this.view.scrollDOM.clientWidth < 384, this.touch);
+    this.toolbar.update(toolbarModel(snapshot, this.host.t));
+    this.toolbar.show(this.view.scrollDOM.clientWidth < 384);
     this.observer.observe(this.toolbar.root);
     this.measure();
     return true;
   }
 
-  close(restoreFocus: boolean): void {
-    if (this.current) this.dismissed = `${this.current.revision}:${this.current.anchor}:${this.current.head}`;
-    const hadFocus = this.toolbar.ownsFocus();
-    this.current = null;
-    this.focusRequested = false;
-    this.noteTargets.clear();
+  close(reason: CloseReason): void {
+    const snapshot = this.current;
+    if (snapshot && reason === 'dismiss') this.dismissed = selectionKey(snapshot);
+    const returnFocus = (reason === 'dismiss' || reason === 'linkApplied') && this.toolbar.ownsFocus();
+    this.current = null; this.focusRequested = false; this.noteTargets.clear();
     if (this.frame) this.window.cancelAnimationFrame(this.frame);
-    this.frame = 0;
-    this.observer.disconnect(); this.toolbar.hide();
-    if (restoreFocus && hadFocus && this.view.dom.isConnected && !this.destroyed) this.view.focus();
+    this.frame = 0; this.observer.disconnect(); this.toolbar.hide();
+    const file = this.view.state.field(editorInfoField, false)?.file;
+    if (returnFocus && snapshot && !this.destroyed && this.view.dom.isConnected && this.view.dom.ownerDocument === this.document &&
+      file === snapshot.file && file.path === snapshot.path && !this.view.hasFocus) this.view.focus();
   }
 
   private validate(): SelectionSnapshot | null {
     if (this.destroyed || !this.current) return null;
-    const fresh = capture(this.view, this.host.app, this.host.store);
-    if (!fresh || !sameSelection(this.current, fresh)) {
-      this.close(false); this.host.notify(this.host.t('stale')); return null;
+    if (!matchesSnapshot(this.view, this.current)) {
+      this.close('stale'); this.host.notify(this.host.t('stale')); return null;
     }
-    return fresh;
+    const result = capture(this.view, this.host.app, this.host.store);
+    if (result.kind === 'blocked') {
+      this.close('stale'); this.host.notify(this.host.t(selectionFeedback(result.reason))); return null;
+    }
+    return result.snapshot;
   }
 
   private format(action: FormatAction, color?: string): void {
     const snapshot = this.validate();
     if (!snapshot) return;
-    const result = formatFragment(snapshot.located, snapshot.source, action, color);
-    if (result.kind === 'unavailable') this.host.notify(this.host.t('unsupported'));
+    const result = formatSelection(snapshot, action, color);
+    if (result.kind === 'unavailable') this.host.notify(this.host.t(actionFeedback(result.reason)));
     else if (result.kind === 'edit') this.commit(snapshot, result.plan, false);
   }
 
@@ -186,13 +185,13 @@ export class EditorController {
     this.applying = true;
     try {
       if (!applyEdit(this.view, snapshot, plan)) {
-        this.close(false); this.host.notify(this.host.t('failed')); return;
+        this.close('failed'); this.host.notify(this.host.t('failed')); return;
       }
-      if (link) this.close(true);
+      if (link) this.close('linkApplied');
       else {
-        this.current = capture(this.view, this.host.app, this.host.store);
-        if (this.current) { this.toolbar.update(this.current.located.fragment); this.measure(); }
-        else this.close(false);
+        const result = capture(this.view, this.host.app, this.host.store);
+        if (result.kind === 'ready') { this.current = result.snapshot; this.toolbar.update(toolbarModel(result.snapshot, this.host.t)); this.measure(); }
+        else this.close('stale');
       }
     } finally { this.applying = false; }
   }
@@ -201,7 +200,8 @@ export class EditorController {
     const snapshot = this.validate();
     if (!snapshot) return;
     const text = snapshot.located.fragment.text;
-    if (!safeLinkText(text)) { this.host.notify(this.host.t('invalidLink')); return; }
+    const result = linkSelection(snapshot, text);
+    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return; }
     const matches = this.host.app.vault.getMarkdownFiles().filter(file => file.basename === text);
     if (matches.length > 1) { this.toolbar.notePicker(); return; }
     if (matches[0]) this.selectNote(matches[0].path, matches[0]);
@@ -209,8 +209,7 @@ export class EditorController {
       if (this.host.app.metadataCache.getFirstLinkpathDest(text, snapshot.path)) {
         this.toolbar.notePicker(); return;
       }
-      const plan = linkPlan(snapshot.located, snapshot.source, text);
-      if (plan) this.commit(snapshot, plan, true); else this.host.notify(this.host.t('invalidLink'));
+      this.commit(snapshot, result.plan, true);
     }
   }
 
@@ -218,40 +217,46 @@ export class EditorController {
     const snapshot = this.validate();
     if (!snapshot) return;
     const file = this.host.app.vault.getFileByPath(path);
-    if (!file || file !== expected || file.extension !== 'md') { this.close(false); this.host.notify(this.host.t('stale')); return; }
+    if (!file || file !== expected || file.extension !== 'md') { this.close('stale'); this.host.notify(this.host.t('stale')); return; }
     const target = this.host.app.metadataCache.fileToLinktext(file, snapshot.path, true);
-    const plan = linkPlan(snapshot.located, snapshot.source, target);
-    if (!plan || this.host.app.metadataCache.getFirstLinkpathDest(target, snapshot.path) !== file) {
+    const result = linkSelection(snapshot, target);
+    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return; }
+    if (this.host.app.metadataCache.getFirstLinkpathDest(target, snapshot.path) !== file) {
       this.host.notify(this.host.t('invalidLink')); return;
     }
-    this.commit(snapshot, plan, true);
+    this.commit(snapshot, result.plan, true);
   }
 
   private async notes(query: string, signal: AbortSignal): Promise<readonly NoteChoice[]> {
     const session = this.current;
+    if (!session) return [];
     const text = query.trim().toLocaleLowerCase();
     const results: NoteChoice[] = [];
-    this.noteTargets.clear();
+    const targets = new Map<string, TFile>();
     const files = this.host.app.vault.getMarkdownFiles();
     for (let i = 0; i < files.length; i++) {
       if (signal.aborted || this.current !== session || this.destroyed) return [];
       const file = files[i]!;
       if (file.path.toLocaleLowerCase().includes(text)) {
-        this.noteTargets.set(file.path, file);
-        const target = this.host.app.metadataCache.fileToLinktext(file, session?.path ?? '', true);
-        results.push({ path: file.path, name: file.basename, disabled: !safeLinkText(target) });
+        targets.set(file.path, file);
+        const target = this.host.app.metadataCache.fileToLinktext(file, session.path, true);
+        const result = linkSelection(session, target);
+        results.push({ path: file.path, name: file.basename, disabledReason: result.kind === 'unavailable' ? this.host.t(actionFeedback(result.reason)) : undefined });
       }
       if (results.length === 50) break;
       if (i > 0 && i % 500 === 0) await new Promise<void>(resolve => this.window.setTimeout(resolve, 0));
     }
+    if (signal.aborted || this.current !== session || this.destroyed) return [];
+    this.noteTargets = targets;
     return results;
   }
 
   private measure(): void {
     if (!this.current || this.destroyed) return;
+    const session = this.current;
     this.view.requestMeasure({ key: this,
       read: () => {
-        if (!this.current || !this.toolbar.visible) return null;
+        if (this.current !== session || !this.toolbar.visible) return null;
         const from = this.view.coordsAtPos(Math.min(this.current.anchor, this.current.head), 1);
         const to = this.view.coordsAtPos(Math.max(this.current.anchor, this.current.head), -1);
         const pane = this.view.scrollDOM.getBoundingClientRect();
@@ -262,21 +267,13 @@ export class EditorController {
         const head = this.current.anchor > this.current.head ? from : to;
         const headVisible = head.top >= bounds.top && head.bottom <= bounds.bottom;
         const anchor = { left: head.left, right: head.right, top: Math.max(bounds.top, Math.min(from.top, to.top)), bottom: Math.min(bounds.bottom, Math.max(from.bottom, to.bottom)) };
-        // Searching can open the keyboard and scroll the original selection out of view.
-        const searching = this.touch && this.toolbar.ownsFocus();
-        const position = !headVisible && !searching ? null : this.touch
-          // Expanded touch panels act as bottom sheets in the keyboard-reduced viewport.
-          ? placeTouch(headVisible && !this.toolbar.expanded ? anchor : null, bounds, size.width, size.height)
-          : place(anchor, bounds, size.width, size.height);
-        return { bounds, position };
+        return headVisible ? place(anchor, bounds, size.width, size.height) : null;
       },
-      write: result => {
-        if (this.destroyed || !this.current) return;
-        if (result && this.touch && this.toolbar.constrain(result.bounds)) { this.measure(); return; }
+      write: position => {
+        if (this.destroyed || this.current !== session) return;
         const focus = this.focusRequested;
         this.focusRequested = false;
-        const position = result?.position;
-        if (!position) { this.close(false); if (focus) this.host.notify(this.host.t('noSpace')); }
+        if (!position) { this.close('noSpace'); if (focus) this.host.notify(this.host.t('noSpace')); }
         else { this.toolbar.positioned(position.left, position.top); if (focus) this.toolbar.focus(); }
       },
     });
@@ -285,13 +282,13 @@ export class EditorController {
   matchesEditor(editor: unknown): boolean { return this.view.state.field(editorInfoField, false)?.editor === editor; }
   reconcile(): void {
     if (!this.current || this.destroyed) return;
-    const snapshot = capture(this.view, this.host.app, this.host.store);
-    if (!snapshot || !sameSelection(this.current, snapshot)) this.close(false);
+    const result = capture(this.view, this.host.app, this.host.store);
+    if (result.kind === 'blocked' || !matchesSnapshot(this.view, this.current)) this.close('stale');
     else this.measure();
   }
   destroy(): void {
     if (this.destroyed) return;
-    this.destroyed = true; this.stopDrag(); this.close(false); this.toolbar.destroy();
+    this.destroyed = true; this.stopDrag(); this.close('destroy'); this.toolbar.destroy();
     for (const dispose of this.disposers) dispose();
     this.host.controllers.delete(this);
   }

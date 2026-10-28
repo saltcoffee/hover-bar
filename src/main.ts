@@ -1,7 +1,7 @@
 import { Plugin, Notice, getLanguage } from 'obsidian';
 import { ViewPlugin } from '@codemirror/view';
 import { translator } from './i18n';
-import { EditorController, type Host } from './editor/controller';
+import { EditorController, type CloseReason, type Host } from './editor/controller';
 import { revisionField } from './editor/context';
 import { colorPreview } from './editor/color-preview';
 import { PreferencesStore } from './settings/store';
@@ -22,7 +22,7 @@ export default class HoverBarPlugin extends Plugin {
     this.addSettingTab(new HoverBarSettingsTab(this.app, this, this.store, this.t));
     let lastStatus = this.store.status;
     this.register(this.store.subscribe(() => {
-      for (const controller of this.controllers) controller.close(false);
+      for (const controller of this.controllers) controller.close('modeChanged');
       this.app.workspace.updateOptions();
       if (lastStatus !== this.store.status && this.store.status !== 'ready') {
         new Notice(this.t(this.store.status === 'conflict' ? 'settingsConflict' : this.store.status));
@@ -34,7 +34,7 @@ export default class HoverBarPlugin extends Plugin {
       if (!controller) new Notice(this.t('noSelection')); else controller.show(true);
     } });
     this.addCommand({ id: 'toggle-automatic-toolbar', name: this.t('toggleAutomatic'), callback: async () => {
-      if (!this.store.enabled) { new Notice(this.t(this.store.status === 'schemaError' ? 'schemaError' : 'loadError')); return; }
+      if (!this.store.enabled) { new Notice(this.t(this.store.status === 'conflict' ? 'settingsConflict' : this.store.status === 'schemaError' ? 'schemaError' : 'loadError')); return; }
       await this.store.set('automatic', !this.store.value.automatic);
       new Notice(this.t(this.store.value.automatic ? 'automaticOn' : 'automaticOff'));
     } });
@@ -42,12 +42,12 @@ export default class HoverBarPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on('layout-change', () => {
       for (const controller of this.controllers) controller.reconcile();
     }));
-    this.registerEvent(this.app.vault.on('rename', () => this.closeAll()));
-    this.registerEvent(this.app.vault.on('delete', () => this.closeAll()));
+    this.registerEvent(this.app.vault.on('rename', () => this.closeAll('stale')));
+    this.registerEvent(this.app.vault.on('delete', () => this.closeAll('stale')));
     if (!this.store.enabled) new Notice(this.t(this.store.status === 'schemaError' ? 'schemaError' : 'loadError'));
   }
 
-  private closeAll(): void { for (const controller of this.controllers) controller.close(false); }
+  private closeAll(reason: CloseReason = 'outside'): void { for (const controller of this.controllers) controller.close(reason); }
   override async onExternalSettingsChange(): Promise<void> { if (this.store && !this.unloaded) await this.store.externalChange(); }
   override onunload(): void { this.unloaded = true; for (const controller of [...this.controllers]) controller.destroy(); }
 }

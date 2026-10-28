@@ -1,6 +1,6 @@
 {
   "name": "hover-bar",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Format selected text with a floating toolbar, text colors, highlights, and internal links.",
   "type": "module",
   "private": true,
