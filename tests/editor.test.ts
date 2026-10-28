@@ -16,7 +16,7 @@ function editor(reverse = false, reject = false) {
     extensions: [revisionField, history(), editorInfoField.init(() => ({ file }) as MarkdownFileInfo), ...(reject ? [EditorState.transactionFilter.of(() => [])] : [])] });
   const view = { get state() { return state; }, dispatch(spec: TransactionSpec) { state = state.update(spec).state; } } as unknown as EditorView;
   const snapshot = (): SelectionSnapshot => ({ file, path: file.path, revision: state.field(revisionField), anchor: state.selection.main.anchor,
-    head: state.selection.main.head, base: 0, source: state.doc.toString(), located: locateFragment(state.doc.toString(), state.selection.main.from, state.selection.main.to)! });
+    head: state.selection.main.head, base: 0, lineLength: state.doc.length, source: state.doc.toString(), located: locateFragment(state.doc.toString(), state.selection.main.from, state.selection.main.to)! });
   return { view, snapshot, file };
 }
 

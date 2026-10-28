@@ -10,6 +10,8 @@ For a production build, run `npm ci` followed by `npm run build`. These develope
 
 Obsidian API types are pinned to the minimum supported app version, currently 1.8.7, so type checking catches newer API usage. Verify editor changes in the minimum supported Obsidian app as well as running the automated checks.
 
+The scoped npm override for `obsidian@1.8.7` replaces its pinned Moment dependency with 2.31.0 to fix [CVE-2026-17495](https://github.com/moment/moment/security/advisories/GHSA-4p3w-j4w9-5jqw). Keep this override while using that SDK; reassess it when upgrading the SDK. Moment is a development dependency and is not bundled into the plugin.
+
 ## Report a problem
 
 Include the Obsidian and plugin versions, OS, editing mode, theme, a small synthetic Markdown example, reproduction steps, and expected versus actual results. Explain whether the problem reproduces with other community plugins disabled. Never attach private notes, vaults, credentials, or unredacted logs.

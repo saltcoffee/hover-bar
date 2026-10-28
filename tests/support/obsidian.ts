@@ -8,4 +8,3 @@ export const editorInfoField = StateField.define<MarkdownFileInfo>({
 });
 export const editorLivePreviewField = StateField.define<boolean>({ create: () => true, update: value => value });
 export class MarkdownView {}
-export const Platform = { isMobile: false };

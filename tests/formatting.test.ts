@@ -102,9 +102,9 @@ describe('single-fragment formatting', () => {
   });
   it('rejects arbitrary CSS and overlong output', () => {
     const located = locateFragment('word', 0, 4)!;
-    expect(formatFragment(located, 'word', 'foreground', 'url(https://example.com)')).toEqual({ kind: 'unavailable' });
+    expect(formatFragment(located, 'word', 'foreground', 'url(https://example.com)')).toEqual({ kind: 'unavailable', reason: 'invalidParameter' });
     const long = 'a'.repeat(10_000);
-    expect(formatFragment(locateFragment(long, 0, long.length)!, long, 'bold')).toEqual({ kind: 'unavailable' });
+    expect(formatFragment(locateFragment(long, 0, long.length)!, long, 'bold')).toEqual({ kind: 'unavailable', reason: 'tooLong' });
   });
   it('requires the exact color attribute order and separators', () => {
     for (const style of ['color:#e05252background-color:#fff3a3', ';background-color:#fff3a3', 'color:#e05252;', 'background-color:#fff3a3;color:#e05252', 'color:#e05252;font-size:40px']) {
@@ -117,12 +117,12 @@ describe('single-fragment formatting', () => {
 describe('internal links', () => {
   it('preserves display text and surrounding whitespace', () => {
     const source = ' term ';
-    expect(linkPlan(locateFragment(source, 0, source.length)!, source, 'folder/note')?.insert).toBe(' [[folder/note|term]] ');
+    expect(linkPlan(locateFragment(source, 0, source.length)!, source, 'folder/note')).toMatchObject({ kind: 'edit', plan: { insert: ' [[folder/note|term]] ' } });
   });
   it.each(['bad|alias', 'bad#heading', 'bad]target', 'bad\nline'])('rejects ambiguous link syntax: %s', target => {
-    expect(linkPlan(locateFragment('term', 0, 4)!, 'term', target)).toBeNull();
+    expect(linkPlan(locateFragment('term', 0, 4)!, 'term', target)).toEqual({ kind: 'unavailable', reason: 'invalidTarget' });
   });
   it('does not drop formatting to make a link', () => {
-    expect(linkPlan(locateFragment('**term**', 0, 8)!, '**term**', 'target')).toBeNull();
+    expect(linkPlan(locateFragment('**term**', 0, 8)!, '**term**', 'target')).toEqual({ kind: 'unavailable', reason: 'plainOnly' });
   });
 });

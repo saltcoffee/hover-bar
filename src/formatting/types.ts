@@ -19,4 +19,5 @@ export interface EditPlan {
   readonly from: number; readonly to: number; readonly expected: string; readonly insert: string;
   readonly contentFrom: number; readonly contentTo: number;
 }
-export type FormatResult = { kind: 'edit'; plan: EditPlan } | { kind: 'noop' } | { kind: 'unavailable' };
+export type FormatUnavailableReason = 'codeOnly' | 'plainOnly' | 'tooLong' | 'invalidParameter';
+export type FormatResult = { kind: 'edit'; plan: EditPlan } | { kind: 'noop' } | { kind: 'unavailable'; reason: FormatUnavailableReason };

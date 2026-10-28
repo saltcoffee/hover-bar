@@ -2,6 +2,28 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.3 — 2026-10-28
+
+### Added
+
+- Actionable selection diagnostics for editor availability, editing preferences, read-only state, text composition, multiple selections, line breaks, protected syntax, and length limits.
+- Consistent action availability across the toolbar, palettes, and menus, with keyboard access to unavailable actions and their explanations.
+
+### Changed
+
+- Restrict Hover Bar to desktop Obsidian and remove touch selection, the mobile bottom toolbar, and on-screen keyboard layout support.
+- Update English and Chinese usage guides and preference text for desktop use.
+
+### Fixed
+
+- Reject formatting and links before writing when the resulting full line would exceed the source limit.
+- Apply the same length checks to quick-link availability and execution.
+- Distinguish link output length limits from invalid link text, targets, and formatting conflicts.
+- Ignore measurements and note queries from closed sessions without consuming a newer session's focus request.
+- Return focus after Escape and successful links without requiring the closed selection to remain editable.
+- Preserve text composition in note search, including confirmation keys delivered after composition ends, so they cannot prematurely insert a link.
+- Upgrade the Obsidian development SDK's transitive Moment dependency to 2.31.0 to fix CVE-2026-17495.
+
 ## 0.1.2 — 2026-10-26
 
 ### Added

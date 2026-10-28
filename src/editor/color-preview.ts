@@ -3,7 +3,7 @@ import { editorInfoField, editorLivePreviewField, MarkdownView } from 'obsidian'
 import { PALETTE } from '../formatting/colors';
 import { parseFragment } from '../formatting/fragment';
 import { MAX_SOURCE } from '../formatting/types';
-import { protectedSyntax } from './context';
+import { inspectSyntax } from './context';
 import type { Host } from './controller';
 
 export function colorPreview(host: Host) {
@@ -33,7 +33,7 @@ export function colorPreview(host: Host) {
             for (const match of line.text.matchAll(/<span style="[^"]+">[^<>]*<\/span>/g)) {
               const fragment = parseFragment(match[0]);
               const from = line.from + match.index;
-              if (!fragment || protectedSyntax(view.state, from, from + match[0].length)) continue;
+              if (!fragment || inspectSyntax(view.state, from, from + match[0].length) !== 'clear') continue;
               const classes = [];
               for (const kind of ['foreground', 'background'] as const) {
                 const color = PALETTE.find(color => color[kind] === fragment[kind]);

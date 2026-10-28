@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULTS, parsePreferences } from '../src/settings/model';
 import { PreferencesStore } from '../src/settings/store';
 import { stringsFor } from '../src/i18n';
-import { place } from '../src/ui/position';
+import { place, viewportBounds } from '../src/ui/position';
 
 describe('preferences and localization', () => {
   it('loads first-run defaults without a false error', () => {
@@ -31,6 +31,11 @@ describe('preferences and localization', () => {
 
 describe('toolbar placement', () => {
   const bounds = { left: 0, right: 400, top: 0, bottom: 600 };
+  it('uses the visible viewport when available and falls back to window dimensions', () => {
+    expect(viewportBounds(1200, 800, { offsetLeft: 12, offsetTop: 40, width: 1000, height: 720 }))
+      .toEqual({ left: 12, right: 1012, top: 40, bottom: 760 });
+    expect(viewportBounds(1200, 800, null)).toEqual({ left: 0, right: 1200, top: 0, bottom: 800 });
+  });
   it('flips below at the top, clamps horizontally and hides when offscreen', () => {
     expect(place({ left: 0, right: 20, top: 10, bottom: 30 }, bounds, 200, 40)).toEqual({ left: 8, top: 38 });
     expect(place({ left: 380, right: 400, top: 300, bottom: 320 }, bounds, 200, 40)).toEqual({ left: 192, top: 252 });

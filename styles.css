@@ -26,7 +26,6 @@
   background: var(--hover-bar-surface);
   box-shadow: 0 5px 18px #0003, 0 1px 3px #0002;
 }
-.hover-bar-actions { display: flex; align-items: center; gap: 2px; }
 .hover-bar-layer button.hover-bar-button {
   display: inline-flex;
   align-items: center;
@@ -110,33 +109,6 @@
 .hover-bar-note strong { font-weight: 550; }
 .hover-bar-note small { overflow: hidden; color: var(--hover-bar-muted); white-space: nowrap; text-overflow: ellipsis; }
 .hover-bar-hint, .hover-bar-notes p { margin: 8px 4px 2px; color: var(--hover-bar-muted); font-size: 11px; }
-/* Dock touch controls away from the native selection menu; keep every action reachable by swiping. */
-.hover-bar-layer.is-touch {
-  display: flex;
-  flex-direction: column-reverse;
-  width: min(480px, var(--hover-bar-available-width, calc(100vw - 16px)));
-  max-width: var(--hover-bar-available-width, calc(100vw - 16px));
-  max-height: var(--hover-bar-available-height, calc(100vh - 16px));
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-}
-.hover-bar-layer.is-touch .hover-bar { flex-shrink: 0; min-width: 0; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
-.hover-bar-layer.is-touch .hover-bar-actions { flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; }
-.hover-bar-layer.is-touch button.hover-bar-button { width: 44px; height: 44px; touch-action: manipulation; }
-.hover-bar-layer.is-touch .hover-bar-actions .hover-bar-button { margin-left: 0; }
-.hover-bar-layer.is-touch .hover-bar-panel { width: 100%; min-height: 0; margin: 0 0 6px; overflow-y: auto; overscroll-behavior: contain; }
-.hover-bar-layer.is-touch button.hover-bar-swatch,
-.hover-bar-layer.is-touch button.hover-bar-menu-item,
-.hover-bar-layer.is-touch .hover-bar-search,
-.hover-bar-layer.is-touch .hover-bar-note { min-height: 44px; touch-action: manipulation; }
-.hover-bar-layer.is-touch button.hover-bar-menu-item { width: 100%; height: auto; }
-.hover-bar-layer.is-touch .hover-bar-search {
-  font-size: 16px;
-  user-select: text;
-  -webkit-user-select: text;
-  -webkit-touch-callout: default;
-}
 .hover-bar-foreground-red { --hover-bar-swatch: #e05252; }
 .hover-bar-foreground-orange { --hover-bar-swatch: #c66b2b; }
 .hover-bar-foreground-yellow { --hover-bar-swatch: #9a7b16; }

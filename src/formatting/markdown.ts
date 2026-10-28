@@ -25,13 +25,13 @@ export function serialize(fragment: Fragment): { source: string; contentFrom: nu
 }
 
 export function formatFragment(located: LocatedFragment, source: string, action: FormatAction, color?: string): FormatResult {
-  if (!['bold', 'italic', 'strike', 'highlight', 'code', 'clearColors', 'foreground', 'background'].includes(action)) return { kind: 'unavailable' };
+  if (!['bold', 'italic', 'strike', 'highlight', 'code', 'clearColors', 'foreground', 'background'].includes(action)) return { kind: 'unavailable', reason: 'invalidParameter' };
   const original = located.fragment;
-  if (original.code && action !== 'code') return { kind: 'unavailable' };
-  if (action === 'code' && (original.marks.length || original.foreground || original.background)) return { kind: 'unavailable' };
+  if (original.code && action !== 'code') return { kind: 'unavailable', reason: 'codeOnly' };
+  if (action === 'code' && (original.marks.length || original.foreground || original.background)) return { kind: 'unavailable', reason: 'plainOnly' };
   let next: Fragment;
   if (action === 'foreground' || action === 'background') {
-    if (!isPaletteColor(action, color)) return { kind: 'unavailable' };
+    if (!isPaletteColor(action, color)) return { kind: 'unavailable', reason: 'invalidParameter' };
     if (original[action] === color) return { kind: 'noop' };
     next = { ...original, [action]: color };
   } else if (action === 'clearColors') {
@@ -44,7 +44,7 @@ export function formatFragment(located: LocatedFragment, source: string, action:
     next = { ...original, marks };
   }
   const serialized = serialize(next);
-  if (serialized.source.length > MAX_SOURCE) return { kind: 'unavailable' };
+  if (serialized.source.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong' };
   const expected = source.slice(located.from, located.to);
   if (serialized.source === expected) return { kind: 'noop' };
   return { kind: 'edit', plan: { from: located.from, to: located.to, expected, insert: serialized.source, contentFrom: serialized.contentFrom, contentTo: serialized.contentTo } };
