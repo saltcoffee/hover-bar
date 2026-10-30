@@ -18,9 +18,9 @@ describe('selection diagnosis and precedence', () => {
     expect(capture(fixture.view, { workspace: { getLeavesOfType: () => [] } } as unknown as typeof fixture.app, fixture.store))
       .toMatchObject({ kind: 'blocked', reason: { kind: 'noEditor' } });
     expect((await selectionFixture('word', { mode: 'preview' })).capture()).toMatchObject({ reason: { kind: 'noEditor' } });
-    fixture.store.value = { ...fixture.store.value, livePreview: false };
+    await fixture.store.set('livePreview', false);
     expect(fixture.capture()).toMatchObject({ reason: { kind: 'modeDisabled', mode: 'livePreview' } });
-    const source = await selectionFixture('word', { live: false }); source.store.value = { ...source.store.value, sourceMode: false };
+    const source = await selectionFixture('word', { live: false }); await source.store.set('sourceMode', false);
     expect(source.capture()).toMatchObject({ reason: { kind: 'modeDisabled', mode: 'source' } });
   });
   it('prioritizes read-only state over composition and cross-line content', async () => {

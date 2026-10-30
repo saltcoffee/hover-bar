@@ -36,7 +36,7 @@ Use the process in [SECURITY.md](SECURITY.md) for sensitive reports.
 
 ## Validation and pull requests
 
-Run `npm run check` before submitting a code change. It runs type checking, lint, the content-preservation and transaction tests, a production build, and release validation. Documentation-only changes need link and content checks. Report only checks actually performed.
+Install the browser once with `npx playwright install chromium` (on Linux, use `npx playwright install --with-deps chromium`). Run `npm run check` before submitting a code change. It runs type checking, lint, the content-preservation and transaction tests, real Chromium toolbar integration tests, a production build, and release validation. The browser tests use the existing Playwright dependency and run with `npm test`; `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` can select an existing Chromium executable. Documentation-only changes need link and content checks. Report only checks actually performed.
 
 For editor changes, report the exact Obsidian version, OS, editing mode, and manual scenarios tested. Use a separate vault with synthetic notes. Automated tests cannot replace host integration checks.
 

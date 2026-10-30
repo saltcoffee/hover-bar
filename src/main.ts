@@ -11,6 +11,7 @@ export default class HoverBarPlugin extends Plugin {
   private readonly controllers = new Set<EditorController>();
   private store!: PreferencesStore;
   private unloaded = false;
+  private settingsTab: HoverBarSettingsTab | null = null;
   private readonly t = translator(getLanguage);
 
   override async onload(): Promise<void> {
@@ -19,11 +20,12 @@ export default class HoverBarPlugin extends Plugin {
     if (this.unloaded) return;
     const host: Host = { app: this.app, store: this.store, t: this.t, controllers: this.controllers, notify: message => { new Notice(message); } };
     this.registerEditorExtension([revisionField, colorPreview(host), ViewPlugin.define(view => new EditorController(view, host))]);
-    this.addSettingTab(new HoverBarSettingsTab(this.app, this, this.store, this.t));
+    this.settingsTab = new HoverBarSettingsTab(this.app, this, this.store, this.t);
+    this.addSettingTab(this.settingsTab);
     let lastStatus = this.store.status;
-    this.register(this.store.subscribe(() => {
-      for (const controller of this.controllers) controller.close('modeChanged');
-      this.app.workspace.updateOptions();
+    this.register(this.store.subscribe(change => {
+      if (change.kind === 'preferences' || !this.store.enabled) this.closeAll('modeChanged');
+      if (change.kind === 'preferences' && change.eligibilityChanged) this.app.workspace.updateOptions();
       if (lastStatus !== this.store.status && this.store.status !== 'ready') {
         new Notice(this.t(this.store.status === 'conflict' ? 'settingsConflict' : this.store.status));
       }
@@ -49,5 +51,5 @@ export default class HoverBarPlugin extends Plugin {
 
   private closeAll(reason: CloseReason = 'outside'): void { for (const controller of this.controllers) controller.close(reason); }
   override async onExternalSettingsChange(): Promise<void> { if (this.store && !this.unloaded) await this.store.externalChange(); }
-  override onunload(): void { this.unloaded = true; for (const controller of [...this.controllers]) controller.destroy(); }
+  override onunload(): void { this.unloaded = true; this.settingsTab?.hide(); this.store?.destroy(); for (const controller of [...this.controllers]) controller.destroy(); }
 }

@@ -1,7 +1,7 @@
 export const en = {
   toolbar: 'Selection formatting', bold: 'Bold', italic: 'Italic', strike: 'Strikethrough',
   code: 'Inline code', highlight: 'Highlight', foreground: 'Text color', background: 'Background color',
-  link: 'Internal link', chooseNote: 'Link to an existing note', more: 'More formatting',
+  link: 'Internal link', chooseNote: 'Link to an existing note', more: 'More',
   clearColors: 'Remove all colors', resetForeground: 'Default text color', resetBackground: 'Remove background color',
   red: 'Red', orange: 'Orange', yellow: 'Yellow', green: 'Green', teal: 'Teal', blue: 'Blue', purple: 'Purple', gray: 'Gray',
   showToolbar: 'Show selection toolbar', toggleAutomatic: 'Toggle automatic toolbar',
@@ -27,12 +27,21 @@ export const en = {
   livePreview: 'Enable in Live Preview', livePreviewDesc: 'Allow the toolbar while editing in Live Preview.',
   sourceMode: 'Enable in Source mode', sourceModeDesc: 'Allow the toolbar while editing Markdown source.',
   keyboard: 'Show after keyboard selection', keyboardDesc: 'Also show automatically when extending a selection with the keyboard.',
-  reset: 'Reset preferences', resetDesc: 'Restore these preferences without changing your notes.',
+  reset: 'Reset all preferences', resetDesc: 'Restore all four switches and the default toolbar layout without changing your notes.',
   retry: 'Retry', loadError: 'Preferences could not be loaded. Retry to enable Hover Bar.',
-  schemaError: 'These preferences belong to a newer Hover Bar version. Update the plugin before saving.',
+  schemaError: 'Unsupported preferences version. Check the plugin version and reload.',
   saveError: 'Your preferences are active but could not be saved. Retry to save them.',
   recovered: 'Some invalid preferences were replaced with defaults.', settingsConflict: 'Preferences changed externally. Reload before saving.',
   reload: 'Reload preferences', current: 'Selected', saved: 'Preferences saved.',
+  layout: 'Toolbar layout', defaultLayout: 'Default layout', customLayout: 'Custom layout',
+  layoutDesc: 'In a custom layout, earlier actions stay visible first when space is limited. Other actions are available in More. The default layout prioritizes strikethrough and active basic formats.',
+  layoutCost: 'Color and note pickers in More take one extra step.', pinned: 'Pinned', unpinned: 'Unpinned',
+  pin: 'Pin', unpin: 'Unpin', moveUp: 'Move up', moveDown: 'Move down',
+  resetLayout: 'Restore default layout', layoutRestored: 'Default layout restored. Other preferences and notes are unchanged.',
+  noPinned: 'All actions are in More.', allPinned: 'All actions are pinned. Actions that do not fit remain available in More.',
+  allVisible: 'All actions are already on the toolbar.', actionUnpinned: '{name} moved to More.',
+  actionPosition: '{name}, position {position} of {total}.', saving: 'Saving…', loadingPreferences: 'Loading preferences…',
+  reloaded: 'Preferences reloaded.', reloadDiscard: 'Use preferences on disk and discard unsaved local changes.',
 } as const;
 export type TextKey = keyof typeof en;
 export type Strings = Record<TextKey, string>;

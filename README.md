@@ -15,6 +15,7 @@ The toolbar appears when you finish selecting text. Ordinary formatting stays in
 ## Features
 
 - A compact floating toolbar near your selection on desktop, with viewport-aware placement.
+- Pin and reorder common actions per vault; unpinned actions and actions that do not fit stay available in **More**.
 - Bold, italic, strikethrough, inline code, and standard Obsidian highlights.
 - Named text and background color palettes, with controls to remove colors.
 - Quick `[[internal links]]` and a picker for existing notes.
@@ -69,11 +70,17 @@ When Hover Bar is available in the community directory:
 
 Open **Settings → Hover Bar** to control automatic display, Live Preview, Source mode, and automatic display after keyboard selection.
 
+Under **Toolbar layout**, use **Pin**, **Unpin**, **Move up**, and **Move down** to choose your main actions. Earlier actions in a custom layout stay visible first when the pane is narrow. The default layout prioritizes strikethrough and active basic formats so they remain easy to cancel. **Restore default layout** keeps the four switches; **Reset all preferences** resets both the switches and layout. Neither changes your notes.
+
+All actions remain available in **More** when you unpin them or the pane gets narrower. Color and note pickers in More take one extra step. Color palettes reduce their column count in narrow panes; if the available area cannot fit usable controls, adjust the pane size or scroll before trying again.
+
 Use **Hover Bar: Show selection toolbar** in the command palette to open the toolbar manually. **Hover Bar: Toggle automatic toolbar** turns automatic display on or off. Assign shortcuts in **Settings → Hotkeys** if you prefer; no default shortcuts are added.
 
 The interface follows Obsidian's language setting: Chinese app languages use Simplified Chinese text, and every other language uses English. No separate language preference is needed.
 
-After opening the toolbar manually, use arrow keys to browse actions, Enter or Space to activate, and Esc to close the panel and then the toolbar. Unavailable buttons remain accessible with arrow keys; activating one explains its limitation without editing the note. Enter used to finish text composition in note search does not insert a link.
+After opening the toolbar manually, use arrow keys to browse actions and Enter or Space to activate. **Back** or Esc returns one level: a picker opened from More returns to More, then to the main toolbar, then to the editor. Unavailable buttons remain accessible with arrow keys; activating one explains its limitation without editing the note. Enter used to finish text composition in note search does not insert a link.
+
+Layout changes take effect immediately and save automatically. If saving fails, your current layout remains active and you can retry in settings. External changes while a save is unfinished pause further saves; reloading uses the preferences currently on disk and discards unsaved local changes.
 
 ## Privacy
 

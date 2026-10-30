@@ -1,11 +1,11 @@
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { undo, redo } from '@codemirror/commands';
-import { editorInfoField, editorLivePreviewField, type App, type TFile } from 'obsidian';
+import { editorInfoField, editorLivePreviewField, Scope, type App, type TFile } from 'obsidian';
 import type { Translate } from '../i18n';
 import type { EditPlan, FormatAction } from '../formatting/types';
 import { PreferencesStore } from '../settings/store';
-import { Toolbar } from '../ui/toolbar';
-import type { NoteChoice } from '../ui/toolbar-types';
+import { Toolbar, type ToolbarMeasurement } from '../ui/toolbar';
+import type { ActionOutcome, NoteChoice } from '../ui/toolbar-types';
 import { place, viewportBounds } from '../ui/position';
 import { applyEdit, ownEdit } from './apply-edit';
 import { capture, matchesSnapshot, type SelectionSnapshot } from './context';
@@ -37,6 +37,8 @@ export class EditorController {
   private readonly window: Window;
   private readonly disposers: (() => void)[] = [];
   private noteTargets = new Map<string, TFile>();
+  private readonly scope: Scope;
+  private scopeActive = false;
 
   constructor(readonly view: EditorView, private readonly host: Host) {
     this.document = view.dom.ownerDocument;
@@ -46,6 +48,16 @@ export class EditorController {
       format: (action, color) => this.format(action, color), quickLink: () => this.quickLink(),
       notes: (query, signal) => this.notes(query, signal), selectNote: path => this.selectNote(path),
       close: () => this.close('dismiss'), resize: () => this.measure(),
+    });
+    this.scope = new Scope(host.app.scope);
+    this.scope.register([], 'Escape', event => {
+      if (!this.toolbar.visible || !this.toolbar.ownsFocus() || event.isComposing || event.keyCode === 229) return;
+      // Host hotkeys run before DOM bubbling. Consume Escape here so the host
+      // cannot move focus back to the editor before the panel restores its row.
+      this.toolbar.escape(); event.stopPropagation(); return false;
+    });
+    this.listen(this.toolbar.root, 'focusin', () => {
+      if (!this.scopeActive) { this.scopeActive = true; this.host.app.keymap.pushScope(this.scope); }
     });
     this.observer = new ResizeObserver(() => this.measure());
     this.listen(this.toolbar.root, 'keydown', event => {
@@ -61,9 +73,18 @@ export class EditorController {
     });
     this.listen(view.dom, 'pointerdown', event => this.beginDrag(event as PointerEvent));
     this.listen(view.dom, 'compositionstart', () => this.close('stale'));
-    const checkFocus = () => queueMicrotask(() => {
-      if (!this.destroyed && !this.view.hasFocus && !this.toolbar.ownsFocus()) this.close('stale');
-    });
+    const checkFocus = (event: Event) => {
+      const next = (event as FocusEvent).relatedTarget;
+      // Native Tab can run microtasks between focusout and focusin, while activeElement is body.
+      if (next && next instanceof this.document.defaultView!.Node) {
+        if (this.toolbar.root.contains(next)) return;
+        if (this.view.dom.contains(next)) { this.releaseScope(); return; }
+      }
+      queueMicrotask(() => {
+        if (!this.toolbar.ownsFocus()) this.releaseScope();
+        if (!this.destroyed && !this.view.hasFocus && !this.toolbar.ownsFocus()) this.close('stale');
+      });
+    };
     this.listen(view.dom, 'focusout', checkFocus);
     this.listen(this.toolbar.root, 'focusout', checkFocus);
     this.listen(this.document, 'pointerdown', event => { if (!this.toolbar.contains(event)) this.close('outside'); }, true);
@@ -141,8 +162,8 @@ export class EditorController {
     const continuing = this.current?.file === snapshot.file && selectionKey(this.current) === key;
     this.focusRequested = manual || (continuing && this.focusRequested);
     this.current = snapshot;
-    this.toolbar.update(toolbarModel(snapshot, this.host.t));
-    this.toolbar.show(this.view.scrollDOM.clientWidth < 384);
+    this.toolbar.update(toolbarModel(snapshot, this.host.store.value, this.host.t));
+    this.toolbar.show();
     this.observer.observe(this.toolbar.root);
     this.measure();
     return true;
@@ -152,12 +173,16 @@ export class EditorController {
     const snapshot = this.current;
     if (snapshot && reason === 'dismiss') this.dismissed = selectionKey(snapshot);
     const returnFocus = (reason === 'dismiss' || reason === 'linkApplied') && this.toolbar.ownsFocus();
-    this.current = null; this.focusRequested = false; this.noteTargets.clear();
+    this.current = null; this.focusRequested = false; this.noteTargets.clear(); this.releaseScope();
     if (this.frame) this.window.cancelAnimationFrame(this.frame);
     this.frame = 0; this.observer.disconnect(); this.toolbar.hide();
     const file = this.view.state.field(editorInfoField, false)?.file;
     if (returnFocus && snapshot && !this.destroyed && this.view.dom.isConnected && this.view.dom.ownerDocument === this.document &&
       file === snapshot.file && file.path === snapshot.path && !this.view.hasFocus) this.view.focus();
+  }
+
+  private releaseScope(): void {
+    if (this.scopeActive) { this.scopeActive = false; this.host.app.keymap.popScope(this.scope); }
   }
 
   private validate(): SelectionSnapshot | null {
@@ -172,27 +197,29 @@ export class EditorController {
     return result.snapshot;
   }
 
-  private format(action: FormatAction, color?: string): void {
+  private format(action: FormatAction, color?: string): ActionOutcome {
     const snapshot = this.validate();
-    if (!snapshot) return;
+    if (!snapshot) return { kind: 'closed' };
     const result = formatSelection(snapshot, action, color);
-    if (result.kind === 'unavailable') this.host.notify(this.host.t(actionFeedback(result.reason)));
-    else if (result.kind === 'edit') this.commit(snapshot, result.plan, false);
+    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return { kind: 'rejected' }; }
+    if (result.kind === 'noop') return { kind: 'unchanged' };
+    return this.commit(snapshot, result.plan, false);
   }
 
-  private commit(snapshot: SelectionSnapshot, plan: EditPlan, link: boolean): void {
-    if (this.applying) return;
+  private commit(snapshot: SelectionSnapshot, plan: EditPlan, link: boolean): ActionOutcome {
+    if (this.applying) return { kind: 'rejected' };
     this.applying = true;
     try {
       if (!applyEdit(this.view, snapshot, plan)) {
-        this.close('failed'); this.host.notify(this.host.t('failed')); return;
+        this.close('failed'); this.host.notify(this.host.t('failed')); return { kind: 'closed' };
       }
       if (link) this.close('linkApplied');
       else {
         const result = capture(this.view, this.host.app, this.host.store);
-        if (result.kind === 'ready') { this.current = result.snapshot; this.toolbar.update(toolbarModel(result.snapshot, this.host.t)); this.measure(); }
+        if (result.kind === 'ready') { this.current = result.snapshot; this.toolbar.update(toolbarModel(result.snapshot, this.host.store.value, this.host.t)); this.measure(); }
         else this.close('stale');
       }
+      return { kind: this.current ? 'applied' : 'closed' };
     } finally { this.applying = false; }
   }
 
@@ -254,6 +281,7 @@ export class EditorController {
   private measure(): void {
     if (!this.current || this.destroyed) return;
     const session = this.current;
+    let measurement: ToolbarMeasurement | null = null;
     this.view.requestMeasure({ key: this,
       read: () => {
         if (this.current !== session || !this.toolbar.visible) return null;
@@ -267,13 +295,17 @@ export class EditorController {
         const head = this.current.anchor > this.current.head ? from : to;
         const headVisible = head.top >= bounds.top && head.bottom <= bounds.bottom;
         const anchor = { left: head.left, right: head.right, top: Math.max(bounds.top, Math.min(from.top, to.top)), bottom: Math.min(bounds.bottom, Math.max(from.bottom, to.bottom)) };
-        return headVisible ? place(anchor, bounds, size.width, size.height) : null;
+        if (!headVisible) return null;
+        const availableHeight = Math.max(anchor.top - bounds.top - 8, bounds.bottom - anchor.bottom - 8);
+        measurement = this.toolbar.readLayout(bounds, availableHeight);
+        return measurement.fits ? place(anchor, bounds, size.width, size.height) : null;
       },
       write: position => {
         if (this.destroyed || this.current !== session) return;
+        if (measurement?.fits && this.toolbar.applyLayout(measurement)) { this.measure(); return; }
         const focus = this.focusRequested;
         this.focusRequested = false;
-        if (!position) { this.close('noSpace'); if (focus) this.host.notify(this.host.t('noSpace')); }
+        if (!position) { const notify = focus || this.toolbar.takeSpaceFeedback(); this.close('noSpace'); if (notify) this.host.notify(this.host.t('noSpace')); }
         else { this.toolbar.positioned(position.left, position.top); if (focus) this.toolbar.focus(); }
       },
     });

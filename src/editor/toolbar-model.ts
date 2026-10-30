@@ -6,8 +6,10 @@ import type { ActionView, ToolbarViewModel } from '../ui/toolbar-types';
 import type { SelectionSnapshot } from './context';
 import { actionFeedback } from './feedback';
 import { formatSelection, linkSelection } from './selection-actions';
+import { BASIC_FORMAT_IDS, resolveLayout } from '../toolbar/layout';
+import type { Preferences } from '../settings/model';
 
-export function toolbarModel(snapshot: SelectionSnapshot, t: Translate): ToolbarViewModel {
+export function toolbarModel(snapshot: SelectionSnapshot, preferences: Preferences, t: Translate): ToolbarViewModel {
   const fragment = snapshot.located.fragment;
   const state = (result: FormatResult | LinkResult): ActionView => result.kind === 'unavailable'
     ? { enabled: false, reason: t(actionFeedback(result.reason)) } : { enabled: true };
@@ -27,11 +29,10 @@ export function toolbarModel(snapshot: SelectionSnapshot, t: Translate): Toolbar
   });
   const linkReason = linkTextRejection(fragment);
   const chooseNote = linkReason ? { enabled: false, reason: t(actionFeedback(linkReason)) } : { enabled: true };
-  return {
-    controls: {
+  const controls: ToolbarViewModel['controls'] = {
       bold: format('bold'), italic: format('italic'), strike: format('strike'), code: format('code'), highlight: format('highlight'),
       foreground: paletteState('foreground'), background: paletteState('background'), clearColors: state(formatSelection(snapshot, 'clearColors')),
       link: state(linkSelection(snapshot, fragment.text)), chooseNote, more: { enabled: true },
-    }, palettes, resets,
   };
+  return { controls, palettes, resets, layout: resolveLayout(preferences.toolbar, BASIC_FORMAT_IDS.filter(id => controls[id].pressed)) };
 }

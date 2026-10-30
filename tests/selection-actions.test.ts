@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { undo } from '@codemirror/commands';
 import { applyEdit } from '../src/editor/apply-edit';
 import { formatSelection, linkSelection } from '../src/editor/selection-actions';
+import { DEFAULTS } from '../src/settings/model';
 import { toolbarModel } from '../src/editor/toolbar-model';
 import { linkPlan } from '../src/links/wikilink';
 import { locateFragment } from '../src/formatting/fragment';
@@ -14,7 +15,7 @@ describe('whole-line budget shared by display and commit', () => {
     const captured = fixture.capture(); if (captured.kind !== 'ready') throw Error('No snapshot');
     const snapshot = captured.snapshot;
     expect(formatSelection(snapshot, 'bold')).toEqual({ kind: 'unavailable', reason: 'tooLong' });
-    expect(toolbarModel(snapshot, key => key).controls.bold).toMatchObject({ enabled: false, reason: 'tooLong' });
+    expect(toolbarModel(snapshot, DEFAULTS, key => key).controls.bold).toMatchObject({ enabled: false, reason: 'tooLong' });
     const unguarded = formatFragment(snapshot.located, snapshot.source, 'bold');
     if (unguarded.kind !== 'edit') throw Error('Expected a fragment plan');
     expect(applyEdit(fixture.view, snapshot, unguarded.plan)).toBe(false);
@@ -51,7 +52,7 @@ describe('whole-line budget shared by display and commit', () => {
   ])('disables an over-budget quick link before activation: $name', async ({ source, from, to }) => {
     const fixture = await selectionFixture(source, { from, to });
     const captured = fixture.capture(); if (captured.kind !== 'ready') throw Error('No snapshot');
-    const snapshot = captured.snapshot, model = toolbarModel(snapshot, key => key);
+    const snapshot = captured.snapshot, model = toolbarModel(snapshot, DEFAULTS, key => key);
     expect(model.controls.link).toEqual({ enabled: false, reason: 'tooLong' });
     expect(linkSelection(snapshot, snapshot.located.fragment.text)).toEqual({ kind: 'unavailable', reason: 'tooLong' });
     // A note-picker target is still unknown; each actual candidate is checked separately.
@@ -63,7 +64,7 @@ describe('whole-line budget shared by display and commit', () => {
     const fixture = await selectionFixture(source, { from: wholeSelection ? 0 : 1, to: wholeSelection ? source.length : 2 });
     const captured = fixture.capture(); if (captured.kind !== 'ready') throw Error('No snapshot');
     const snapshot = captured.snapshot;
-    expect(toolbarModel(snapshot, key => key).controls.link).toEqual({ enabled: true });
+    expect(toolbarModel(snapshot, DEFAULTS, key => key).controls.link).toEqual({ enabled: true });
     const result = linkSelection(snapshot, snapshot.located.fragment.text); if (result.kind !== 'edit') throw Error('No link plan');
     expect(applyEdit(fixture.view, snapshot, result.plan)).toBe(true); expect(fixture.view.state.doc.length).toBe(10_000);
     expect(undo(fixture.view)).toBe(true); expect(fixture.view.state.doc.toString()).toBe(source);
@@ -84,7 +85,7 @@ describe('link and action rejection reasons', () => {
   });
   it('does not label code conflicts as length failures or invalid links', async () => {
     const fixture = await selectionFixture('`word`'); const result = fixture.capture(); if (result.kind !== 'ready') throw Error('No snapshot');
-    const model = toolbarModel(result.snapshot, key => key);
+    const model = toolbarModel(result.snapshot, DEFAULTS, key => key);
     expect(model.controls.bold).toMatchObject({ enabled: false, reason: 'codeOnly' });
     expect(model.controls.link).toMatchObject({ enabled: false, reason: 'codeOnly' });
     expect(model.controls.code).toMatchObject({ enabled: true, pressed: true });
