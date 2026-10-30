@@ -2,6 +2,28 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.4 — 2026-10-30
+
+### Added
+
+- Per-vault toolbar layouts with pin, unpin, move up, move down, and restore-default controls that work with the keyboard.
+- A unified More panel for unpinned actions and actions that do not fit the current editor pane, including colors and note selection.
+- Visible Back controls and staged Escape navigation from More to color palettes and note search.
+
+### Changed
+
+- Allocate toolbar actions using the available pane width; the default layout prioritizes strikethrough and active basic formats, while custom layouts follow the configured order.
+- Adapt color palettes from four columns to one while preserving usable targets, focus, and keyboard navigation.
+- Migrate existing preferences to schema 2 on the next explicit change or restore, preserving all four switches and the default layout.
+
+### Fixed
+
+- Keep preference-save status changes from closing an active toolbar, and refresh settings controls after external reloads without overwriting the loaded order.
+- Persist explicit restores even when invalid preferences have already recovered to the same default values in memory.
+- Stop queued writes after external conflicts, preserve the latest snapshot on retry, and prevent stale save or load completions from replacing newer state.
+- Close formatting panels only after a successful edit or valid no-op, and hand focus to a current control before removing its old location.
+- Handle Escape in the toolbar's host keyboard scope so Obsidian does not steal focus during staged panel returns.
+
 ## 0.1.3 — 2026-10-28
 
 ### Added

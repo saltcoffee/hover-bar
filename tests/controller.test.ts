@@ -4,7 +4,7 @@ import type { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import { EditorController } from '../src/editor/controller';
-import { editorInfoField } from './support/obsidian';
+import { editorInfoField, Scope as TestScope } from './support/obsidian';
 import type { CaptureResult, SelectionSnapshot } from '../src/editor/context';
 import { locateFragment } from '../src/formatting/fragment';
 import { PreferencesStore } from '../src/settings/store';
@@ -21,6 +21,10 @@ vi.mock('../src/ui/toolbar', () => ({
     root = Object.assign(new EventTarget(), { getBoundingClientRect: () => ({ width: 352, height: 42 }) });
     visible = false;
     update = vi.fn();
+    readLayout = vi.fn(() => ({ fits: true }));
+    applyLayout = vi.fn(() => false);
+    takeSpaceFeedback = vi.fn(() => false);
+    escape = vi.fn();
     focus = vi.fn();
     positioned = vi.fn();
     contains = vi.fn();
@@ -59,13 +63,14 @@ function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, en
   };
   const notify = vi.fn();
   const store = new PreferencesStore({ load: async () => null, save: async () => {} });
-  const controller = new EditorController(view, { app: {} as App, store, t: key => key, controllers: new Set(), notify });
+  const keymap = { pushScope: vi.fn(), popScope: vi.fn() };
+  const controller = new EditorController(view, { app: { keymap } as unknown as App, store, t: key => key, controllers: new Set(), notify });
   const flush = () => {
     const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(0));
     const pending = [...requests.values()]; requests.clear();
     for (const request of pending) request.write(request.read());
   };
-  return { controller, toolbar: controller['toolbar'], flush, requests, notify, viewport, dom, document, window, view, store };
+  return { controller, toolbar: controller['toolbar'], flush, requests, notify, viewport, dom, document, window, view, store, keymap };
 }
 
 beforeEach(() => {
@@ -79,6 +84,30 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('selection toolbar focus and placement', () => {
+  it('owns the host Escape scope only while the toolbar has focus, and releases it on close', () => {
+    const { controller, toolbar, flush, keymap } = setup();
+    controller.show(true); flush();
+    expect(keymap.pushScope).not.toHaveBeenCalled();
+    vi.mocked(toolbar.ownsFocus).mockReturnValue(true);
+    toolbar.root.dispatchEvent(new Event('focusin')); toolbar.root.dispatchEvent(new Event('focusin'));
+    expect(keymap.pushScope).toHaveBeenCalledTimes(1);
+    const scope = controller['scope'] as unknown as TestScope;
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { isComposing: false, keyCode: 0 });
+    expect(scope.handlers.get('Escape')!(event as unknown as KeyboardEvent)).toBe(false);
+    expect(toolbar.escape).toHaveBeenCalledTimes(1);
+    controller.close('dismiss'); controller.destroy();
+    expect(keymap.popScope).toHaveBeenCalledExactlyOnceWith(scope);
+  });
+  it('leaves composing Escape alone and releases host key ownership when focus returns to the editor', async () => {
+    const { controller, toolbar, flush, keymap } = setup(); controller.show(true); flush();
+    vi.mocked(toolbar.ownsFocus).mockReturnValue(true); toolbar.root.dispatchEvent(new Event('focusin'));
+    const scope = controller['scope'] as unknown as TestScope;
+    const event = Object.assign(new Event('keydown'), { isComposing: true, keyCode: 229 });
+    expect(scope.handlers.get('Escape')!(event as unknown as KeyboardEvent)).toBeUndefined();
+    expect(toolbar.escape).not.toHaveBeenCalled();
+    vi.mocked(toolbar.ownsFocus).mockReturnValue(false); toolbar.root.dispatchEvent(new Event('focusout')); await Promise.resolve();
+    expect(keymap.popScope).toHaveBeenCalledTimes(1); expect(toolbar.visible).toBe(true); controller.destroy();
+  });
   it('preserves a manual focus request when resize measurement replaces it, then focuses only once', () => {
     const { controller, toolbar, flush } = setup();
     expect(controller.show(true)).toBe(true);
@@ -153,7 +182,7 @@ describe('desktop selection lifecycle', () => {
   it('shows after a pointer selection without stealing editor focus', () => {
     const { controller, toolbar, flush } = setup();
     controller.update(select('select.pointer')); flush();
-    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith(false);
+    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith();
     expect(toolbar.focus).not.toHaveBeenCalled();
     controller.destroy();
   });
@@ -198,11 +227,11 @@ describe('desktop selection lifecycle', () => {
     controller.update(select()); flush(); expect(toolbar.visible).toBe(false);
     controller.destroy();
   });
-  it('uses the compact toolbar in a narrow desktop pane', () => {
+  it('measures the current pane instead of passing a compact-layout flag', () => {
     const { controller, toolbar, flush, view } = setup();
     Object.defineProperty(view.scrollDOM, 'clientWidth', { value: 380 });
     controller.show(false); flush();
-    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith(true);
+    expect(toolbar.visible).toBe(true); expect(toolbar.show).toHaveBeenCalledWith();
     controller.destroy();
   });
   it('repositions on viewport changes and closes when the selection leaves view', () => {
