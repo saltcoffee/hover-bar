@@ -17,27 +17,33 @@ export class PreferencesView {
     const doc = root.ownerDocument;
     root.classList.add('hover-bar-settings');
     this.lastLoad = store.loadCount;
-    this.status = doc.createElement('p'); this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
+    this.status = doc.createElement('p'); this.status.className = 'hover-bar-settings-status'; this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
     this.recovery = doc.createElement('p'); this.recovery.textContent = t('recovered');
     this.retry = doc.createElement('button'); this.retry.type = 'button';
     this.retry.addEventListener('click', () => { if (store.status === 'saveError') void store.save(); else void store.load(); });
     root.append(this.status, this.recovery, this.retry);
     for (const key of BOOLEAN_KEYS) {
-      const row = doc.createElement('div'); row.className = 'setting-item';
+      const row = doc.createElement('div'); row.className = 'setting-item mod-toggle';
       const label = doc.createElement('label'); label.className = 'setting-item-info';
       const name = doc.createElement('div'); name.className = 'setting-item-name'; name.textContent = t(key);
       const description = doc.createElement('div'); description.className = 'setting-item-description'; description.textContent = t(`${key}Desc`);
       const toggle = doc.createElement('input'); toggle.type = 'checkbox'; toggle.className = 'hover-bar-preference-toggle';
+      toggle.id = `hover-bar-preference-${key}`; label.htmlFor = toggle.id;
       toggle.setAttribute('aria-label', t(key)); toggle.addEventListener('change', () => { void store.set(key, toggle.checked); });
-      label.append(name, description, toggle); row.append(label); root.append(row); this.toggles.set(key, toggle);
+      const control = doc.createElement('div'); control.className = 'setting-item-control';
+      const switchLabel = doc.createElement('label'); switchLabel.className = 'checkbox-container hover-bar-preference-switch';
+      switchLabel.append(toggle); control.append(switchLabel);
+      label.append(name, description); row.append(label, control); root.append(row); this.toggles.set(key, toggle);
     }
     const layoutRoot = doc.createElement('section'); root.append(layoutRoot);
     this.layout = new LayoutControls(layoutRoot, store, t);
-    const resetRow = doc.createElement('div'); resetRow.className = 'setting-item';
+    const resetRow = doc.createElement('div'); resetRow.className = 'setting-item hover-bar-reset-row';
+    const resetInfo = doc.createElement('div'); resetInfo.className = 'setting-item-info';
     const resetDescription = doc.createElement('div'); resetDescription.className = 'setting-item-description'; resetDescription.textContent = t('resetDesc');
+    const resetControl = doc.createElement('div'); resetControl.className = 'setting-item-control';
     this.reset = doc.createElement('button'); this.reset.type = 'button'; this.reset.textContent = t('reset');
     this.reset.addEventListener('click', () => { void store.reset(); });
-    resetRow.append(resetDescription, this.reset); root.append(resetRow);
+    resetInfo.append(resetDescription); resetControl.append(this.reset); resetRow.append(resetInfo, resetControl); root.append(resetRow);
     this.unsubscribe = store.subscribe(change => this.refresh(change));
     this.refresh({ kind: 'preferences', eligibilityChanged: true, layoutChanged: true });
   }
@@ -47,7 +53,10 @@ export class PreferencesView {
       if (change.eligibilityChanged) for (const [key, toggle] of this.toggles) toggle.checked = this.store.value[key];
       if (change.layoutChanged) this.layout.update();
     }
-    for (const toggle of this.toggles.values()) toggle.disabled = !this.store.enabled;
+    for (const toggle of this.toggles.values()) {
+      toggle.disabled = !this.store.enabled;
+      toggle.parentElement!.className = `checkbox-container hover-bar-preference-switch${toggle.checked ? ' is-enabled' : ''}${toggle.disabled ? ' is-disabled' : ''}`;
+    }
     this.layout.updateAvailability(); this.reset.disabled = !this.store.enabled;
     const retryable = this.store.status !== 'ready' && !this.store.loading;
     if (!retryable && this.root.ownerDocument.activeElement === this.retry) this.layout.focus();
