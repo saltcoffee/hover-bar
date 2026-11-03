@@ -1,5 +1,3 @@
-import type { ColorKind } from './types';
-
 export const PALETTE = [
   { id: 'red', foreground: '#e05252', background: '#f8d7da' },
   { id: 'orange', foreground: '#c66b2b', background: '#ffe3c2' },
@@ -11,8 +9,15 @@ export const PALETTE = [
   { id: 'gray', foreground: '#7f848e', background: '#e3e5e8' },
 ] as const;
 
-export function isPaletteColor(kind: ColorKind, value: unknown): value is string | undefined {
-  return value === undefined || PALETTE.some(color => color[kind] === value);
+export function normalizeHex(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const hex = value.trim();
+  if (!/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return null;
+  return (hex.length === 4 ? '#' + [...hex.slice(1)].map(char => char + char).join('') : hex).toLowerCase();
+}
+
+export function isCanonicalHex(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/.test(value);
 }
 
 export function parseColorStyle(style: string): { foreground?: string; background?: string } | null {

@@ -1,14 +1,14 @@
-import { setIcon } from 'obsidian';
 import type { Translate } from '../i18n';
 import type { ActionId } from '../toolbar/layout';
 import { paletteColumns } from '../toolbar/layout';
 import { actionButton, focusButton, setActionState } from './controls';
 import { NotePicker } from './note-picker';
+import { ColorPalette } from './color-palette';
 import type { PanelState } from './panel-navigation';
 import type { PaletteKind, ToolbarActions, ToolbarViewModel } from './toolbar-types';
 
 interface Callbacks { activate(id: ActionId): void; apply(kind: PaletteKind, color?: string): void; back(): void }
-export interface PanelGeometry { readonly fits: boolean; readonly width: number; readonly bodyHeight: number; readonly columns: number }
+export interface PanelGeometry { readonly fits: boolean; readonly width: number; readonly bodyHeight: number; readonly columns: number; readonly scrollTop: number }
 
 export class ToolbarPanels {
   readonly root: HTMLDivElement;
@@ -19,9 +19,7 @@ export class ToolbarPanels {
   private overflow: readonly ActionId[] = [];
   private picker: NotePicker | null = null;
   private menuRows = new Map<ActionId, HTMLButtonElement>();
-  private swatches = new Map<string, HTMLButtonElement>();
-  private reset: HTMLButtonElement | null = null;
-  private columns = 4;
+  private palette: ColorPalette | null = null;
 
   constructor(private readonly document: Document, private readonly t: Translate, private readonly actions: ToolbarActions, private readonly callbacks: Callbacks) {
     this.root = document.createElement('div'); this.root.className = 'hover-bar-panel'; this.root.hidden = true;
@@ -33,29 +31,21 @@ export class ToolbarPanels {
   get scrollTop(): number { return this.body.scrollTop; }
   get visible(): boolean { return this.state.kind !== 'none'; }
   setState(state: PanelState): void {
-    this.picker?.cancel(); this.picker = null; this.state = state;
-    this.body.replaceChildren(); this.menuRows.clear(); this.swatches.clear(); this.reset = null;
+    this.picker?.cancel(); this.picker = null; this.palette?.dispose(); this.palette = null; this.state = state;
+    this.body.replaceChildren(); this.menuRows.clear();
     this.root.hidden = state.kind === 'none';
     if (state.kind === 'none') return;
     this.root.setAttribute('role', state.kind === 'notes' ? 'dialog' : 'group');
     this.root.setAttribute('aria-label', this.t(state.kind === 'palette' ? state.palette : state.kind === 'notes' ? 'chooseNote' : 'more'));
     if (state.kind === 'more') { this.renderMore(); this.body.scrollTop = state.scrollTop; }
-    else if (state.kind === 'palette') this.renderPalette(state.palette);
+    else if (state.kind === 'palette' && this.model) this.palette = new ColorPalette(this.document, this.body, this.back, state.palette, this.t, this.actions, this.callbacks.apply, this.model);
     else this.picker = new NotePicker(this.document, this.body, this.t, this.actions);
   }
 
   update(model: ToolbarViewModel): void {
     this.model = model;
     for (const [id, row] of this.menuRows) setActionState(row, model.controls[id], this.t(id));
-    if (this.state.kind !== 'palette') return;
-    const kind = this.state.palette;
-    for (const color of model.palettes[kind]) {
-      const swatch = this.swatches.get(color.id);
-      if (!swatch) continue;
-      setActionState(swatch, color, color.label); swatch.replaceChildren();
-      if (color.pressed) setIcon(swatch, 'check');
-    }
-    if (this.reset) setActionState(this.reset, model.resets[kind], this.t(kind === 'foreground' ? 'resetForeground' : 'resetBackground'));
+    this.palette?.update(model);
   }
 
   setOverflow(ids: readonly ActionId[]): void {
@@ -82,31 +72,9 @@ export class ToolbarPanels {
     if (this.model) this.update(this.model);
   }
 
-  private renderPalette(kind: PaletteKind): void {
-    if (!this.model) return;
-    const grid = this.document.createElement('div'); grid.className = 'hover-bar-palette'; grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', this.t(kind));
-    for (const color of this.model.palettes[kind]) {
-      const swatch = this.document.createElement('button'); swatch.type = 'button'; swatch.tabIndex = -1;
-      swatch.className = `hover-bar-swatch hover-bar-${kind}-${color.id}`; swatch.dataset.swatch = color.id;
-      swatch.addEventListener('click', () => {
-        const current = this.model?.palettes[kind].find(item => item.id === color.id);
-        if (current?.enabled) this.callbacks.apply(kind, current.color); else if (current?.reason) this.actions.explain(current.reason);
-      });
-      grid.append(swatch); this.swatches.set(color.id, swatch);
-    }
-    this.reset = this.document.createElement('button'); this.reset.type = 'button'; this.reset.className = 'hover-bar-button hover-bar-menu-item';
-    this.reset.textContent = this.t(kind === 'foreground' ? 'resetForeground' : 'resetBackground');
-    this.reset.addEventListener('click', () => {
-      const current = this.model?.resets[kind];
-      if (current?.enabled) this.callbacks.apply(kind); else if (current?.reason) this.actions.explain(current.reason);
-    });
-    this.body.append(grid, this.reset); this.update(this.model);
-    const first = [...this.swatches.values()][0]; if (first) first.tabIndex = 0;
-  }
-
   focus(): void {
     if (this.state.kind === 'notes') { this.body.querySelector('input')?.focus({ preventScroll: true }); return; }
-    focusButton(this.state.kind === 'palette' ? [...this.swatches.values()][0] : this.menuRows.values().next().value ?? this.back);
+    if (this.palette) this.palette.focus(); else focusButton(this.menuRows.values().next().value ?? this.back);
   }
   focusAction(id: ActionId): boolean {
     const button = this.menuRows.get(id);
@@ -122,7 +90,7 @@ export class ToolbarPanels {
   }
 
   readGeometry(width: number, height: number): PanelGeometry {
-    if (!this.visible) return { fits: true, width, bodyHeight: 0, columns: 4 };
+    if (!this.visible) return { fits: true, width, bodyHeight: 0, columns: 4, scrollTop: this.body.scrollTop };
     const window = this.document.defaultView!;
     const style = window.getComputedStyle(this.root), back = this.back.getBoundingClientRect();
     const number = (value: string) => Number.parseFloat(value) || 0;
@@ -133,7 +101,8 @@ export class ToolbarPanels {
     const gridStyle = this.body.querySelector('.hover-bar-palette');
     const gap = gridStyle ? number(window.getComputedStyle(gridStyle).gap) : 8;
     const columns = paletteColumns(content, number(style.getPropertyValue('--hover-bar-swatch-min-size')) || 32, gap);
-    return { width, bodyHeight, columns, fits: content >= 32 && bodyHeight >= minimum && (this.state.kind !== 'palette' || columns >= 1) };
+    return { width, bodyHeight, columns, scrollTop: this.palette?.readScrollTop(bodyHeight) ?? this.body.scrollTop,
+      fits: content >= 32 && bodyHeight >= minimum && (this.state.kind !== 'palette' || columns >= 1) };
   }
 
   applyGeometry(geometry: PanelGeometry): boolean {
@@ -141,31 +110,17 @@ export class ToolbarPanels {
     const width = `${geometry.width}px`, height = `${geometry.bodyHeight}px`, columns = String(geometry.columns);
     const changed = this.root.style.width !== width || this.body.style.maxHeight !== height || this.root.style.getPropertyValue('--hover-bar-palette-columns') !== columns;
     if (changed) { this.root.style.width = width; this.body.style.maxHeight = height; this.root.style.setProperty('--hover-bar-palette-columns', columns); }
-    this.columns = geometry.columns; return changed;
+    this.palette?.setColumns(geometry.columns);
+    const scrolled = this.palette?.applyScrollTop(geometry.scrollTop, changed) ?? false;
+    return changed || scrolled;
   }
 
   onKey(event: KeyboardEvent): boolean {
     if (this.state.kind === 'notes' || this.state.kind === 'none') return false;
     const active = this.document.activeElement;
-    const swatches = [...this.swatches.values()]; const index = swatches.indexOf(active as HTMLButtonElement);
+    if (this.palette) return this.palette.onKey(event);
     let target: HTMLElement | undefined;
-    if (this.state.kind === 'palette') {
-      const tabStop = swatches.find(button => button.tabIndex === 0) ?? swatches[0];
-      if (event.key === 'Tab') {
-        if (active === this.back && !event.shiftKey) target = tabStop;
-        else if (index >= 0) target = event.shiftKey ? this.back : this.reset!;
-        else if (active === this.reset && event.shiftKey) target = tabStop;
-      } else if (index >= 0) {
-        if (event.key === 'Home') target = swatches[0];
-        else if (event.key === 'End') target = swatches.at(-1);
-        else if (event.key === 'ArrowLeft') target = swatches[Math.max(0, index - 1)];
-        else if (event.key === 'ArrowRight') target = swatches[Math.min(swatches.length - 1, index + 1)];
-        else if (event.key === 'ArrowUp') target = index < this.columns ? this.back : swatches[index - this.columns];
-        else if (event.key === 'ArrowDown') target = Math.floor(index / this.columns) === Math.floor((swatches.length - 1) / this.columns) ? this.reset! : swatches[Math.min(swatches.length - 1, index + this.columns)];
-      } else if (active === this.back && event.key === 'ArrowDown') target = swatches[0];
-      else if (active === this.reset && event.key === 'ArrowUp') target = swatches.at(-1);
-      if (target && swatches.includes(target as HTMLButtonElement)) for (const button of swatches) button.tabIndex = button === target ? 0 : -1;
-    } else {
+    {
       const items = [this.back, ...this.menuRows.values()];
       const index = items.indexOf(active as HTMLButtonElement);
       const step = ['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : ['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 0;

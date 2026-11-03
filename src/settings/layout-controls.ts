@@ -17,19 +17,21 @@ export class LayoutControls {
 
   constructor(private readonly root: HTMLElement, private readonly store: PreferencesStore, private readonly t: Translate) {
     const doc = root.ownerDocument;
-    this.heading = doc.createElement('h3'); this.heading.textContent = t('layout'); this.heading.tabIndex = -1;
-    this.mode = doc.createElement('p'); this.mode.className = 'setting-item-description';
-    const description = doc.createElement('p'); description.textContent = t('layoutDesc'); description.className = 'setting-item-description';
-    const cost = doc.createElement('p'); cost.textContent = t('layoutCost'); cost.className = 'setting-item-description';
-    const pinnedTitle = doc.createElement('h4'); pinnedTitle.textContent = t('pinned');
+    root.classList.add('hover-bar-layout-settings');
+    this.heading = doc.createElement('h3'); this.heading.className = 'hover-bar-layout-heading'; this.heading.textContent = t('layout'); this.heading.tabIndex = -1;
+    this.mode = doc.createElement('p'); this.mode.className = 'setting-item-description hover-bar-layout-description';
+    const description = doc.createElement('p'); description.textContent = t('layoutDesc'); description.className = 'setting-item-description hover-bar-layout-description';
+    const cost = doc.createElement('p'); cost.textContent = t('layoutCost'); cost.className = 'setting-item-description hover-bar-layout-description';
+    const pinnedTitle = doc.createElement('h4'); pinnedTitle.className = 'hover-bar-layout-subheading'; pinnedTitle.textContent = t('pinned');
     this.pinned = doc.createElement('ol'); this.pinned.className = 'hover-bar-layout-list'; this.pinned.setAttribute('aria-label', t('pinned'));
-    const unpinnedTitle = doc.createElement('h4'); unpinnedTitle.textContent = t('unpinned');
+    const unpinnedTitle = doc.createElement('h4'); unpinnedTitle.className = 'hover-bar-layout-subheading'; unpinnedTitle.textContent = t('unpinned');
     this.unpinned = doc.createElement('ul'); this.unpinned.className = 'hover-bar-layout-list'; this.unpinned.setAttribute('aria-label', t('unpinned'));
     this.emptyPinned = doc.createElement('p'); this.emptyPinned.textContent = t('noPinned');
     this.emptyUnpinned = doc.createElement('p'); this.emptyUnpinned.textContent = t('allPinned');
     this.reset = this.button(t('resetLayout')); this.reset.addEventListener('click', () => { void store.resetLayout(); this.announce(t('layoutRestored')); });
     this.announcement = doc.createElement('p'); this.announcement.className = 'hover-bar-settings-feedback'; this.announcement.setAttribute('role', 'status'); this.announcement.setAttribute('aria-live', 'polite');
-    root.append(this.heading, this.mode, description, cost, pinnedTitle, this.pinned, this.emptyPinned, unpinnedTitle, this.unpinned, this.emptyUnpinned, this.reset, this.announcement);
+    const footer = doc.createElement('div'); footer.className = 'hover-bar-layout-footer'; footer.append(this.announcement, this.reset);
+    root.append(this.heading, this.mode, description, cost, pinnedTitle, this.pinned, this.emptyPinned, unpinnedTitle, this.unpinned, this.emptyUnpinned, footer);
     for (const id of ACTION_IDS) {
       const element = doc.createElement('li'); element.className = 'hover-bar-layout-row'; element.dataset.action = id;
       const label = doc.createElement('span'); label.className = 'hover-bar-layout-label';
@@ -50,7 +52,7 @@ export class LayoutControls {
   focus(): void { this.heading.focus({ preventScroll: true }); }
 
   private change(id: ActionId, control: 'toggle' | 'up' | 'down'): void {
-    if (!this.store.enabled) return;
+    if (!this.store.canChangePreferences) return;
     const pinned = [...resolveLayout(this.store.value.toolbar).pinned];
     const index = pinned.indexOf(id);
     if (control === 'toggle') {
@@ -83,8 +85,8 @@ export class LayoutControls {
       row.toggle.setAttribute('aria-label', `${row.toggle.textContent} ${this.t(action)}`);
       row.up.setAttribute('aria-label', `${this.t('moveUp')} ${this.t(action)}`); row.down.setAttribute('aria-label', `${this.t('moveDown')} ${this.t(action)}`);
       row.up.hidden = row.down.hidden = !pinned;
-      row.up.disabled = !this.store.enabled || index <= 0;
-      row.down.disabled = !this.store.enabled || index < 0 || index === view.pinned.length - 1;
+      row.up.disabled = !this.store.canChangePreferences || index <= 0;
+      row.down.disabled = !this.store.canChangePreferences || index < 0 || index === view.pinned.length - 1;
       (pinned ? this.pinned : this.unpinned).append(row.element);
     }
     this.emptyPinned.hidden = view.pinned.length !== 0; this.emptyUnpinned.hidden = view.unpinned.length !== 0;
@@ -100,10 +102,10 @@ export class LayoutControls {
     const pinned = resolveLayout(this.store.value.toolbar).pinned;
     for (const [id, row] of this.rows) {
       const index = pinned.indexOf(id);
-      row.toggle.disabled = !this.store.enabled;
-      row.up.disabled = !this.store.enabled || index <= 0;
-      row.down.disabled = !this.store.enabled || index < 0 || index === pinned.length - 1;
+      row.toggle.disabled = !this.store.canChangePreferences;
+      row.up.disabled = !this.store.canChangePreferences || index <= 0;
+      row.down.disabled = !this.store.canChangePreferences || index < 0 || index === pinned.length - 1;
     }
-    this.reset.disabled = !this.store.enabled;
+    this.reset.disabled = !this.store.canChangePreferences;
   }
 }

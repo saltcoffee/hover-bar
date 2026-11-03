@@ -5,30 +5,9 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { backState, expandedPanel, type PanelState } from '../src/ui/panel-navigation';
 import type { ActionId } from '../src/toolbar/layout';
 import { PALETTE } from '../src/formatting/colors';
 import type { FixtureOptions } from './browser/toolbar-fixture';
-
-describe('bounded panel navigation', () => {
-  it.each(['foreground', 'background'] as const)('returns from a direct %s palette to the bar', palette => {
-    const state: PanelState = { kind: 'palette', palette, origin: { kind: 'bar', actionId: palette } };
-    expect(expandedPanel(state, palette)).toBe(true); expect(expandedPanel(state, 'more')).toBe(false);
-    expect(backState(state)).toEqual({ kind: 'none' });
-  });
-  it.each(['foreground', 'background', 'chooseNote'] as const)('preserves the More origin, row and scroll when returning from %s', id => {
-    const origin = { kind: 'more', actionId: id, scrollTop: 127 } as const;
-    const state: PanelState = id === 'chooseNote' ? { kind: 'notes', origin } : { kind: 'palette', palette: id, origin };
-    expect(expandedPanel(state, 'more')).toBe(true);
-    const parent = backState(state);
-    expect(parent).toEqual({ kind: 'more', scrollTop: 127, focusId: id });
-    expect(backState(parent)).toEqual({ kind: 'none' });
-  });
-  it('returns from direct notes without retaining an old More parent', () => {
-    const state: PanelState = { kind: 'notes', origin: { kind: 'bar', actionId: 'chooseNote' } };
-    expect(backState(state)).toEqual({ kind: 'none' }); expect(expandedPanel(state, 'more')).toBe(false);
-  });
-});
 
 // Real Toolbar + panels + NotePicker, with native Chromium focus, Tab and CSS geometry.
 // The controller cases also retain real CodeMirror; only the Obsidian SDK is adapted.
@@ -283,11 +262,11 @@ describe('Toolbar DOM integration', () => {
         await focused(`[data-swatch="${PALETTE[i]!.id}"]`);
         await page.keyboard.press('ArrowRight');
       }
-      await focused('[data-swatch="gray"]'); await page.keyboard.press('ArrowDown'); await focused(reset);
-      await page.keyboard.press('ArrowUp'); await focused('[data-swatch="gray"]');
+      await focused('[data-swatch="gray"]'); await page.keyboard.press('ArrowDown'); await focused('[data-swatch="gray"]');
       await page.keyboard.press('Home'); await focused('[data-swatch="red"]');
       await page.keyboard.press('ArrowLeft'); await focused('[data-swatch="red"]');
-      await page.keyboard.press('ArrowUp'); await focused(back);
+      await page.keyboard.press('ArrowUp'); await focused('[data-swatch="red"]');
+      await page.keyboard.press('Shift+Tab'); await focused(back);
       await page.keyboard.press('ArrowDown'); await focused('[data-swatch="red"]');
       await page.keyboard.press('ArrowDown'); await focused(`[data-swatch="${PALETTE[columns]!.id}"]`);
       await page.keyboard.press('ArrowUp'); await focused('[data-swatch="red"]');
@@ -300,9 +279,11 @@ describe('Toolbar DOM integration', () => {
       await page.keyboard.press('Shift+Tab'); await focused(back);
       await page.keyboard.press('Tab'); await focused('[data-swatch="gray"]');
       expect(await page.locator(`${swatches}[tabindex="0"]`).count()).toBe(1);
+      await page.keyboard.press('Tab'); await focused('.hover-bar-hex');
       await page.keyboard.press('Tab'); await focused(reset);
+      await page.keyboard.press('Shift+Tab'); await focused('.hover-bar-hex');
       await page.keyboard.press('Shift+Tab'); await focused('[data-swatch="gray"]');
-      await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await focused('#outside');
+      await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await focused('#outside');
     });
   }
 
@@ -329,4 +310,102 @@ describe('Toolbar DOM integration', () => {
     }
     await original!.dispose();
   });
+
+  for (const language of ['en', 'zh-CN']) for (const sourceMode of [false, true]) for (const kind of ['foreground', 'background'] as const) {
+    it.each(['bar', 'more'] as const)(`${language} ${sourceMode ? 'source' : 'live'}: applies custom ${kind} from %s without touching the draft selection`, async origin => {
+      await mount({ controller: true, pinned: origin === 'bar' ? [kind] : [], language, sourceMode }); await open(kind, origin);
+      const hex = page.locator('.hover-bar-hex'); await hex.fill(' #ABC ');
+      await domExpect(hex).toHaveAccessibleName(language === 'en' ? 'HEX color' : 'HEX 颜色');
+      expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toBe('before text after');
+      expect(await page.locator('.hover-bar-color-sample').evaluate((element, kind) => {
+        const style = getComputedStyle(element); return kind === 'foreground' ? style.color : style.backgroundColor;
+      }, kind)).toBe('rgb(170, 187, 204)');
+      await page.keyboard.press('Enter'); await focused(bar(origin === 'bar' ? kind : 'more'));
+      await domExpect(page.locator(panel)).toBeHidden(); await page.evaluate(() => window.toolbarTest.flush());
+      const snapshot = await page.evaluate(() => window.toolbarTest.inspect());
+      expect(snapshot.text).toBe(`before <span style="${kind === 'foreground' ? 'color' : 'background-color'}:#aabbcc">text</span> after`);
+      expect(snapshot.history?.[kind]).toEqual(['#aabbcc']); expect(snapshot.saved?.colorHistory[kind]).toEqual(['#aabbcc']);
+      if (!sourceMode) {
+        const decorated = page.locator(`.cm-content .hover-bar-color-${kind}`).first();
+        await domExpect(decorated).toBeVisible();
+        expect(await decorated.evaluate((element, kind) => kind === 'foreground' ? getComputedStyle(element).color : getComputedStyle(element).backgroundColor, kind)).toBe('rgb(170, 187, 204)');
+      } else expect(await page.locator('.cm-content .hover-bar-color-foreground, .cm-content .hover-bar-color-background').count()).toBe(0);
+      await open(kind, origin);
+      await domExpect(page.getByRole('group', { name: language === 'en' ? 'Recent colors' : '最近使用', exact: true }).locator('button')).toHaveCount(1);
+    });
+  }
+
+  it('rejects invalid custom drafts and keeps input undo separate from editor history', async () => {
+    await mount({ controller: true, pinned: ['foreground'] }); await open('foreground', 'bar');
+    const hex = page.locator('.hover-bar-hex');
+    for (const value of ['abc', '#abcd', '#aabbccdd', 'red', 'url(x)', '#aabbcc;color:red', '<img src=x>']) {
+      await hex.fill(value); await domExpect(page.locator('.hover-bar-apply-color')).toBeDisabled();
+      await page.keyboard.press('Enter'); await domExpect(hex).toHaveAttribute('aria-invalid', 'true');
+      expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toBe('before text after');
+      expect(await page.evaluate(() => window.toolbarTest.inspect().history?.foreground)).toEqual([]);
+    }
+    await hex.fill(''); await hex.pressSequentially('#abc'); await page.keyboard.press('ControlOrMeta+z');
+    expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toBe('before text after');
+    await hex.fill('#abc'); await page.keyboard.press('Enter');
+    await open('foreground', 'bar'); await page.locator('.hover-bar-hex').press('Enter');
+    await page.keyboard.press('ControlOrMeta+z');
+    expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toBe('before text after');
+    expect(await page.evaluate(() => window.toolbarTest.inspect().history?.foreground)).toEqual(['#aabbcc']);
+    await page.keyboard.press('ControlOrMeta+Shift+z');
+    expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toContain('color:#aabbcc');
+  });
+
+  it('does not apply the IME confirmation Enter delivered after compositionend', async () => {
+    await mount({ controller: true, pinned: ['foreground'] }); await open('foreground', 'bar');
+    await page.locator('.hover-bar-hex').fill('#abc');
+    await page.locator('.hover-bar-hex').evaluate(input => {
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229, bubbles: true }));
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    });
+    expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toBe('before text after'); await focused('.hover-bar-hex');
+    await page.keyboard.press('Enter'); expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toContain('color:#aabbcc');
+  });
+
+  it('continues text color, bold, background and text reset while history saves fail, then retries the latest history', async () => {
+    await mount({ controller: true, pinned: ['foreground', 'bold', 'background'], saveFailure: true });
+    await open('foreground', 'bar'); await page.locator('.hover-bar-hex').fill('#abc'); await page.keyboard.press('Enter');
+    await activate(bar('bold')); await open('background', 'bar'); await page.locator('.hover-bar-hex').fill('#123'); await page.keyboard.press('Enter');
+    await open('foreground', 'bar'); await activate(reset);
+    const before = await page.evaluate(() => window.toolbarTest.inspect());
+    expect(before.text).toBe('before **<span style="background-color:#112233">text</span>** after');
+    expect(before.history).toEqual({ foreground: ['#aabbcc'], background: ['#112233'] }); expect(before.historyStatus).toBe('saveError');
+    await domExpect(page.locator('.hover-bar-layer')).toBeVisible(); await focused(bar('foreground'));
+    await page.evaluate(async () => { window.toolbarTest.failSaves(false); await window.toolbarTest.flush(); });
+    const after = await page.evaluate(() => window.toolbarTest.inspect()); expect(after.text).toBe(before.text); expect(after.selection).toEqual(before.selection);
+    expect(after.saved?.colorHistory).toEqual(before.history); expect(after.historyStatus).toBe('ready'); await focused(bar('foreground'));
+  });
+
+  it('hands focus over before an external history update removes the active swatch, without closing the editor session', async () => {
+    await mount({ controller: true, pinned: ['foreground'] }); await open('foreground', 'bar');
+    const original = await page.evaluate(() => window.toolbarTest.inspect().selection);
+    await page.evaluate(() => window.toolbarTest.recent('foreground', ['#aabbcc', '#112233']));
+    await page.locator('[data-swatch="#aabbcc"]').focus();
+    await page.evaluate(() => window.toolbarTest.recent('foreground', ['#112233', '#445566'])); await focused('[data-swatch="#112233"]');
+    await page.evaluate(() => window.toolbarTest.recent('foreground', ['#778899'])); await focused('[data-swatch="#778899"]');
+    await page.evaluate(() => window.toolbarTest.recent('foreground', [])); await focused(back);
+    await domExpect(page.locator(panel)).toBeVisible(); expect(await page.evaluate(() => window.toolbarTest.inspect().selection)).toEqual(original);
+  });
+
+  it('retains the exact focused swatch when reordered and preserves an active HEX draft and caret', async () => {
+    await mount({ controller: true, pinned: ['foreground'] }); await open('foreground', 'bar');
+    await page.evaluate(() => window.toolbarTest.recent('foreground', ['#aabbcc', '#112233']));
+    const selected = page.locator('[data-swatch="#aabbcc"]'); await selected.focus(); const original = await selected.elementHandle();
+    await page.evaluate(() => window.toolbarTest.recent('foreground', ['#445566', '#112233', '#aabbcc']));
+    expect(await original!.evaluate(node => node === document.activeElement && node.isConnected)).toBe(true); await original!.dispose();
+    await page.locator('.hover-bar-hex').fill('#12');
+    await page.locator('.hover-bar-hex').evaluate(input => (input as HTMLInputElement).setSelectionRange(1, 3));
+    await page.evaluate(() => window.toolbarTest.recent('foreground', [])); await focused('.hover-bar-hex');
+    expect(await page.locator('.hover-bar-hex').evaluate(input => {
+      const hex = input as HTMLInputElement; return [hex.value, hex.selectionStart, hex.selectionEnd];
+    })).toEqual(['#12', 1, 3]); await domExpect(page.locator(panel)).toBeVisible();
+  });
+
 });

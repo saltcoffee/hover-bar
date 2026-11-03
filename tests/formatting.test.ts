@@ -73,6 +73,15 @@ describe('single-fragment formatting', () => {
     source = apply(source, 'bold');
     expect(apply(source, 'clearColors')).toBe('**word**');
   });
+  it.each(['中文 😀', 'Tom & Jerry', '&amp;amp;', String.raw`\*literal\*`, String.raw`a\\b`])('preserves custom color combinations and marks through repeated edits: %s', text => {
+    let source = apply(apply(text, 'bold'), 'foreground', '#aabbcc');
+    source = apply(source, 'background', '#112233'); source = apply(source, 'foreground', '#445566');
+    expect(source.match(/<span/g)).toHaveLength(1);
+    expect(parseFragment(source)).toMatchObject({ text: decodeText(text), marks: ['bold'], foreground: '#445566', background: '#112233' });
+    source = apply(source, 'foreground'); expect(parseFragment(source)).toMatchObject({ text: decodeText(text), background: '#112233', marks: ['bold'] });
+    expect(parseFragment(source)?.foreground).toBeUndefined();
+    expect(parseFragment(apply(source, 'clearColors'))).toMatchObject({ text: decodeText(text), marks: ['bold'] });
+  });
   it('treats an unchanged color as a no-op before normalizing existing marks', () => {
     const source = '_<span style="color:#e05252">word</span>_';
     const located = locateFragment(source, 0, source.length)!;

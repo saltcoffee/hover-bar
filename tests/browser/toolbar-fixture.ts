@@ -1,13 +1,17 @@
 import { EditorState } from '@codemirror/state';
-import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditorView, ViewPlugin, keymap } from '@codemirror/view';
+import { history, historyKeymap } from '@codemirror/commands';
 import { Language, defineLanguageFacet, ensureSyntaxTree, languageDataProp } from '@codemirror/language';
 import { parser } from '@lezer/markdown';
 import type { App, TFile } from 'obsidian';
 import { EditorController } from '../../src/editor/controller';
 import { revisionField } from '../../src/editor/context';
+import { colorPreview } from '../../src/editor/color-preview';
 import { PALETTE } from '../../src/formatting/colors';
 import { translator } from '../../src/i18n';
 import { PreferencesStore } from '../../src/settings/store';
+import { encodeSettings, type StoredSettingsV3 } from '../../src/settings/persistence';
+import type { ColorHistory } from '../../src/settings/color-history';
 import { ACTION_IDS, resolveLayout, type ActionId } from '../../src/toolbar/layout';
 import { Toolbar, type ToolbarMeasurement } from '../../src/ui/toolbar';
 import type { ActionOutcome, ToolbarId, ToolbarViewModel } from '../../src/ui/toolbar-types';
@@ -19,17 +23,24 @@ export interface FixtureOptions {
   outcome?: ActionOutcome['kind'];
   disabled?: ToolbarId[];
   controller?: boolean;
+  language?: string;
+  saveFailure?: boolean;
+  sourceMode?: boolean;
 }
 export interface FixtureEvent { type: string; action?: string; color?: string }
 export interface ToolbarFixture {
   mount(options?: FixtureOptions): Promise<void>;
   layout(width: number, pinned?: ActionId[]): ToolbarMeasurement;
   resizeEditor(width: number): void;
-  inspect(): { events: FixtureEvent[]; scope: { pushes: number; pops: number }; text: string; selection: number[] };
+  recent(kind: 'foreground' | 'background', colors: string[]): Promise<void>;
+  prepare(source: string, from: number, to: number): Promise<void>;
+  failSaves(fail: boolean): void;
+  flush(): Promise<void>;
+  inspect(): { events: FixtureEvent[]; scope: { pushes: number; pops: number }; text: string; selection: number[]; history?: ColorHistory; historyStatus?: string; saved: StoredSettingsV3 | null };
 }
 declare global { interface Window { toolbarTest: ToolbarFixture } }
 
-const t = translator(() => 'en');
+let t = translator(() => 'en');
 let toolbar: Toolbar | null = null;
 let view: EditorView | null = null;
 let controller: EditorController | undefined;
@@ -38,6 +49,8 @@ let model: ToolbarViewModel;
 let width = 640;
 let events: FixtureEvent[] = [];
 let scope = { pushes: 0, pops: 0 };
+let disk: StoredSettingsV3 | null = null;
+let saveFailure = false;
 
 function layout(nextWidth: number, pinned?: ActionId[]): ToolbarMeasurement {
   if (!toolbar) throw Error('Direct Toolbar fixture is not mounted');
@@ -56,6 +69,7 @@ async function mount(options: FixtureOptions = {}): Promise<void> {
   view?.destroy(); view = null; controller = undefined; store?.destroy(); store = null;
   document.querySelector('#outside')?.remove();
   events = []; scope = { pushes: 0, pops: 0 }; width = options.width ?? 640;
+  t = translator(() => options.language ?? 'en'); disk = null; saveFailure = false;
   if (options.controller) await mountController(options);
   else {
     const state = (id: ToolbarId) => ({ enabled: !options.disabled?.includes(id), reason: 'Unavailable here' });
@@ -66,6 +80,7 @@ async function mount(options: FixtureOptions = {}): Promise<void> {
         PALETTE.map(color => ({ id: color.id, color: color[kind], label: color.id, enabled: true })),
       ])) as unknown as ToolbarViewModel['palettes'],
       resets: { foreground: { enabled: true }, background: { enabled: true } },
+      recent: { foreground: [], background: [] }, colors: { foreground: undefined, background: undefined },
     };
     toolbar = new Toolbar(document, t, {
       format: (action, color) => {
@@ -100,26 +115,43 @@ async function mountController(options: FixtureOptions): Promise<void> {
       getFirstLinkpathDest: (name: string) => [file, target].find(item => item.basename === name),
     },
   } as unknown as App;
-  store = new PreferencesStore({ load: async () => null, save: async () => {} });
+  store = new PreferencesStore({ load: async () => disk, save: async value => { if (saveFailure) throw Error('disk'); disk = value; } });
   await store.load();
   if (options.pinned) await store.setLayout({ kind: 'custom', pinned: options.pinned });
+  saveFailure = options.saveFailure ?? false;
   const host = { app, store, t, controllers: new Set<EditorController>(), notify: (reason: string) => events.push({ type: 'notice', action: reason }) };
   const facet = defineLanguageFacet();
   const language = new Language(facet, parser.configure({ props: [languageDataProp.add(type => type.isTop ? facet : undefined)] }));
   const editor = document.querySelector<HTMLElement>('#editor')!; editor.style.width = `${width}px`;
-  view = new EditorView({ parent: editor, state: EditorState.create({ doc: 'before text after', extensions: [
-    language, revisionField, editorInfoField.init(() => ({ app, file, editor: markdownView.editor, hoverPopover: null })),
-    editorLivePreviewField, EditorView.lineWrapping,
+  view = new EditorView({ parent: editor, state: EditorState.create({ doc: 'before text after', selection: { anchor: 7, head: 11 }, extensions: [
+    language, history(), keymap.of(historyKeymap), revisionField, editorInfoField.init(() => ({ app, file, editor: markdownView.editor, hoverPopover: null })),
+    editorLivePreviewField.init(() => !options.sourceMode), EditorView.lineWrapping, colorPreview(host),
     ViewPlugin.define(editorView => controller = new EditorController(editorView, host)),
   ] }) });
   view.focus(); ensureSyntaxTree(view.state, view.state.doc.length, 200);
-  view.dispatch({ selection: { anchor: 7, head: 11 } });
-  await new Promise(requestAnimationFrame); controller!.show(true);
+  store.subscribe(change => {
+    if (change.kind === 'preferences' || !store!.enabled) controller?.close('modeChanged');
+    else if (change.kind === 'history') controller?.refreshHistory();
+  });
+  await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); controller!.show(true);
 }
 
 window.toolbarTest = {
   mount, layout,
   resizeEditor: width => { document.querySelector<HTMLElement>('#editor')!.style.width = `${width}px`; controller!.reconcile(); },
+  recent: async (kind, colors) => {
+    if (store) { disk = encodeSettings(store.value, { ...store.history, [kind]: colors }); await store.externalChange(); }
+    else {
+      const recent = colors.map(color => ({ id: color, color, label: color, enabled: true }));
+      model = { ...model, recent: { ...model.recent, [kind]: recent } }; toolbar!.update(model); layout(width);
+    }
+  },
+  prepare: async (source, from, to) => {
+    view!.dispatch({ changes: { from: 0, to: view!.state.doc.length, insert: source }, selection: { anchor: from, head: to } });
+    ensureSyntaxTree(view!.state, view!.state.doc.length, 200); await new Promise(requestAnimationFrame); controller!.show(true);
+  },
+  failSaves: fail => { saveFailure = fail; },
+  flush: async () => { await store?.save(); },
   inspect: () => ({ events, scope, text: view?.state.doc.toString() ?? '',
-    selection: view ? [view.state.selection.main.anchor, view.state.selection.main.head] : [] }),
+    selection: view ? [view.state.selection.main.anchor, view.state.selection.main.head] : [], history: store?.history, historyStatus: store?.historyStatus, saved: disk }),
 };

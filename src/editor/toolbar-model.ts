@@ -8,8 +8,9 @@ import { actionFeedback } from './feedback';
 import { formatSelection, linkSelection } from './selection-actions';
 import { BASIC_FORMAT_IDS, resolveLayout } from '../toolbar/layout';
 import type { Preferences } from '../settings/model';
+import { EMPTY_HISTORY, type ColorHistory } from '../settings/color-history';
 
-export function toolbarModel(snapshot: SelectionSnapshot, preferences: Preferences, t: Translate): ToolbarViewModel {
+export function toolbarModel(snapshot: SelectionSnapshot, preferences: Preferences, t: Translate, history: ColorHistory = EMPTY_HISTORY): ToolbarViewModel {
   const fragment = snapshot.located.fragment;
   const state = (result: FormatResult | LinkResult): ActionView => result.kind === 'unavailable'
     ? { enabled: false, reason: t(actionFeedback(result.reason)) } : { enabled: true };
@@ -19,9 +20,12 @@ export function toolbarModel(snapshot: SelectionSnapshot, preferences: Preferenc
   });
   const palette = (kind: 'foreground' | 'background') => PALETTE.map(color => ({
     ...state(formatSelection(snapshot, kind, color[kind])), id: color.id, color: color[kind],
-    label: `${t(color.id)} · ${color[kind]}`, pressed: fragment[kind] === color[kind],
+    label: `${t(kind)} · ${t(color.id)} · ${color[kind]}`, pressed: fragment[kind] === color[kind],
   }));
   const palettes = { foreground: palette('foreground'), background: palette('background') };
+  const recent = (kind: 'foreground' | 'background') => history[kind].map(color => ({
+    ...state(formatSelection(snapshot, kind, color)), id: color, color, label: `${t(kind)} · ${color}`, pressed: fragment[kind] === color,
+  }));
   const resets = { foreground: state(formatSelection(snapshot, 'foreground')), background: state(formatSelection(snapshot, 'background')) };
   const paletteState = (kind: 'foreground' | 'background'): ActionView => ({
     enabled: resets[kind].enabled || palettes[kind].some(color => color.enabled),
@@ -34,5 +38,7 @@ export function toolbarModel(snapshot: SelectionSnapshot, preferences: Preferenc
       foreground: paletteState('foreground'), background: paletteState('background'), clearColors: state(formatSelection(snapshot, 'clearColors')),
       link: state(linkSelection(snapshot, fragment.text)), chooseNote, more: { enabled: true },
   };
-  return { controls, palettes, resets, layout: resolveLayout(preferences.toolbar, BASIC_FORMAT_IDS.filter(id => controls[id].pressed)) };
+  return { controls, palettes, recent: { foreground: recent('foreground'), background: recent('background') },
+    colors: { foreground: fragment.foreground, background: fragment.background }, resets,
+    layout: resolveLayout(preferences.toolbar, BASIC_FORMAT_IDS.filter(id => controls[id].pressed)) };
 }

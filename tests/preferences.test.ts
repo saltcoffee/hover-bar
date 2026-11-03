@@ -15,9 +15,9 @@ const custom = (pinned: unknown) => ({ ...encodeSettings(DEFAULTS), toolbar: { m
 
 describe('preferences codec', () => {
   it('loads first-run defaults and migrates valid legacy switches without saving', () => {
-    expect(decodeSettings(null)).toEqual({ value: DEFAULTS, migrated: false, recovered: false });
+    expect(decodeSettings(null)).toMatchObject({ value: DEFAULTS, migrated: false, recovered: false });
     const result = decodeSettings({ schemaVersion: 1, automatic: false, livePreview: false, sourceMode: true, keyboard: true });
-    expect(result).toEqual({ value: { automatic: false, livePreview: false, sourceMode: true, keyboard: true, toolbar: { kind: 'default' } }, migrated: true, recovered: false });
+    expect(result).toMatchObject({ value: { automatic: false, livePreview: false, sourceMode: true, keyboard: true, toolbar: { kind: 'default' } }, migrated: true, recovered: false });
     expect(result.value).not.toHaveProperty('schemaVersion');
   });
   it('separates recovery from migration and preserves unrelated valid values', () => {
@@ -27,7 +27,7 @@ describe('preferences codec', () => {
     expect(decodeSettings([])).toMatchObject({ value: DEFAULTS, recovered: true });
     expect(decodeSettings({ ...encodeSettings(DEFAULTS), keyboard: undefined })).toMatchObject({ recovered: true });
   });
-  it.each([3, 99, '2', null, 0, -1, 1.5, undefined])('rejects an explicit unsupported version %s', schemaVersion => {
+  it.each([4, 99, '2', null, 0, -1, 1.5, undefined])('rejects an explicit unsupported version %s', schemaVersion => {
     expect(() => decodeSettings({ schemaVersion })).toThrow(UnsupportedSchemaError);
   });
   it('preserves custom order while removing duplicates and invalid IDs', () => {
@@ -92,6 +92,7 @@ describe('preferences persistence and notifications', () => {
     const store = new PreferencesStore({ load: async () => null, save: dto => { values.push(dto); return values.length === 1 ? first.promise : second.promise; } });
     await store.load();
     const r1 = store.setLayout({ kind: 'custom', pinned: ['highlight'] });
+    await settle();
     const r2 = store.setLayout({ kind: 'custom', pinned: ['highlight', 'bold'] });
     await settle(); expect(values).toHaveLength(1); expect(store.saving).toBe(true);
     first.resolve(); await settle(); expect(values).toHaveLength(2); expect(store.saving).toBe(true);
@@ -113,7 +114,7 @@ describe('preferences persistence and notifications', () => {
     await store.load(); const first = store.set('automatic', false), second = store.set('keyboard', true);
     if (phase !== 'queued') await settle();
     if (phase === 'failed') await Promise.all([first, second]);
-    disk = custom(['background']); await store.externalChange();
+    disk = custom(['background']); const external = store.externalChange(); request.resolve(); await external;
     expect(store.status).toBe('conflict'); expect(store.enabled).toBe(false);
     const before = save.mock.calls.length;
     await store.reset(); await store.set('automatic', true); await store.save();

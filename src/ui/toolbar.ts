@@ -18,7 +18,6 @@ export class Toolbar {
   private model: ToolbarViewModel | null = null;
   private visibleIds: readonly ActionId[] = [];
   private layoutKey = '';
-  private geometryKey = '';
   private spaceFeedback = false;
   private lastActionOrigin: PanelOrigin | null = null;
 
@@ -199,11 +198,7 @@ export class Toolbar {
       else if (hadPanelFocus && actionId && ids.includes(actionId)) this.focusEntry(actionId);
       this.roving();
     } else this.panels.setOverflow(measurement.layout.overflow);
-    const geometryKey = JSON.stringify(measurement.panel);
-    if (this.panels.visible && geometryKey !== this.geometryKey) {
-      changed = this.panels.applyGeometry(measurement.panel) || changed;
-      this.geometryKey = geometryKey;
-    }
+    if (this.panels.visible) changed = this.panels.applyGeometry(measurement.panel) || changed;
     return changed;
   }
 

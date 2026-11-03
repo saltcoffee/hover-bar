@@ -27,7 +27,7 @@ export const en = {
   livePreview: 'Enable in Live Preview', livePreviewDesc: 'Allow the toolbar while editing in Live Preview.',
   sourceMode: 'Enable in Source mode', sourceModeDesc: 'Allow the toolbar while editing Markdown source.',
   keyboard: 'Show after keyboard selection', keyboardDesc: 'Also show automatically when extending a selection with the keyboard.',
-  reset: 'Reset all preferences', resetDesc: 'Restore all four switches and the default toolbar layout without changing your notes.',
+  reset: 'Reset all preferences', resetDesc: 'Restore all four switches and the default toolbar layout. Notes and recent colors are unchanged.',
   retry: 'Retry', loadError: 'Preferences could not be loaded. Retry to enable Hover Bar.',
   schemaError: 'Unsupported preferences version. Check the plugin version and reload.',
   saveError: 'Your preferences are active but could not be saved. Retry to save them.',
@@ -42,6 +42,16 @@ export const en = {
   allVisible: 'All actions are already on the toolbar.', actionUnpinned: '{name} moved to More.',
   actionPosition: '{name}, position {position} of {total}.', saving: 'Saving…', loadingPreferences: 'Loading preferences…',
   reloaded: 'Preferences reloaded.', reloadDiscard: 'Use preferences on disk and discard unsaved local changes.',
+  recentColors: 'Recent colors', noRecentColors: 'Applied colors will appear here.', presetColors: 'Preset colors',
+  customColor: 'Custom color', hexColor: 'HEX color', hexHint: 'Enter #RGB or #RRGGBB, for example #abc.',
+  invalidColor: 'Enter a valid #RGB or #RRGGBB value.', applyColor: 'Apply color', colorSample: 'Color preview',
+  historySaved: 'Recent colors saved.', historySaving: 'Saving recent colors…', historyLoading: 'Reloading recent colors…',
+  historySaveError: 'Recent colors are not saved. Note edits are unaffected. Retry in settings.',
+  historyConflict: 'Recent colors changed externally. Reloading discards local history unsaved before reload starts. Colors applied during reload are kept.',
+  historyRecovered: 'Recent color history was repaired. Notes and preferences are unchanged.',
+  reloadHistory: 'Reload recent colors', clearHistory: 'Clear recent colors',
+  clearHistoryDesc: 'Clear text and background color history without changing notes or preferences.',
+  preferencesPending: 'Preferences have unsaved changes. Retry to save them.', preferencesPaused: 'Preferences cannot be changed while data is reloading or recent colors are in conflict. Reload in settings first.',
 } as const;
 export type TextKey = keyof typeof en;
 export type Strings = Record<TextKey, string>;

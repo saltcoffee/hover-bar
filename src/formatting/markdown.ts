@@ -1,4 +1,4 @@
-import { isPaletteColor } from './colors';
+import { isCanonicalHex } from './colors';
 import { htmlText, markdownText } from './text';
 import { MAX_SOURCE, type FormatAction, type Fragment, type FormatResult, type LocatedFragment, type Mark } from './types';
 
@@ -31,7 +31,7 @@ export function formatFragment(located: LocatedFragment, source: string, action:
   if (action === 'code' && (original.marks.length || original.foreground || original.background)) return { kind: 'unavailable', reason: 'plainOnly' };
   let next: Fragment;
   if (action === 'foreground' || action === 'background') {
-    if (!isPaletteColor(action, color)) return { kind: 'unavailable', reason: 'invalidParameter' };
+    if (color !== undefined && !isCanonicalHex(color)) return { kind: 'unavailable', reason: 'invalidParameter' };
     if (original[action] === color) return { kind: 'noop' };
     next = { ...original, [action]: color };
   } else if (action === 'clearColors') {
