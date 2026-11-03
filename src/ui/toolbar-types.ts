@@ -10,6 +10,8 @@ export interface ToolbarViewModel {
   readonly layout: LayoutView;
   readonly controls: Readonly<Record<ToolbarId, ActionView>>;
   readonly palettes: Readonly<Record<PaletteKind, readonly SwatchView[]>>;
+  readonly recent: Readonly<Record<PaletteKind, readonly SwatchView[]>>;
+  readonly colors: Readonly<Record<PaletteKind, string | undefined>>;
   readonly resets: Readonly<Record<PaletteKind, ActionView>>;
 }
 export interface NoteChoice { readonly path: string; readonly name: string; readonly disabledReason?: string }

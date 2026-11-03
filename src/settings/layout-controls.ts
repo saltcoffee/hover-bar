@@ -52,7 +52,7 @@ export class LayoutControls {
   focus(): void { this.heading.focus({ preventScroll: true }); }
 
   private change(id: ActionId, control: 'toggle' | 'up' | 'down'): void {
-    if (!this.store.enabled) return;
+    if (!this.store.canChangePreferences) return;
     const pinned = [...resolveLayout(this.store.value.toolbar).pinned];
     const index = pinned.indexOf(id);
     if (control === 'toggle') {
@@ -85,8 +85,8 @@ export class LayoutControls {
       row.toggle.setAttribute('aria-label', `${row.toggle.textContent} ${this.t(action)}`);
       row.up.setAttribute('aria-label', `${this.t('moveUp')} ${this.t(action)}`); row.down.setAttribute('aria-label', `${this.t('moveDown')} ${this.t(action)}`);
       row.up.hidden = row.down.hidden = !pinned;
-      row.up.disabled = !this.store.enabled || index <= 0;
-      row.down.disabled = !this.store.enabled || index < 0 || index === view.pinned.length - 1;
+      row.up.disabled = !this.store.canChangePreferences || index <= 0;
+      row.down.disabled = !this.store.canChangePreferences || index < 0 || index === view.pinned.length - 1;
       (pinned ? this.pinned : this.unpinned).append(row.element);
     }
     this.emptyPinned.hidden = view.pinned.length !== 0; this.emptyUnpinned.hidden = view.unpinned.length !== 0;
@@ -102,10 +102,10 @@ export class LayoutControls {
     const pinned = resolveLayout(this.store.value.toolbar).pinned;
     for (const [id, row] of this.rows) {
       const index = pinned.indexOf(id);
-      row.toggle.disabled = !this.store.enabled;
-      row.up.disabled = !this.store.enabled || index <= 0;
-      row.down.disabled = !this.store.enabled || index < 0 || index === pinned.length - 1;
+      row.toggle.disabled = !this.store.canChangePreferences;
+      row.up.disabled = !this.store.canChangePreferences || index <= 0;
+      row.down.disabled = !this.store.canChangePreferences || index < 0 || index === pinned.length - 1;
     }
-    this.reset.disabled = !this.store.enabled;
+    this.reset.disabled = !this.store.canChangePreferences;
   }
 }

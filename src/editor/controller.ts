@@ -14,6 +14,7 @@ import { formatSelection, linkSelection } from './selection-actions';
 import { toolbarModel } from './toolbar-model';
 
 export type CloseReason = 'dismiss' | 'linkApplied' | 'stale' | 'outside' | 'windowBlur' | 'modeChanged' | 'noSpace' | 'failed' | 'destroy';
+interface CommitResult { readonly edited: boolean; readonly outcome: ActionOutcome }
 
 function selectionKey(snapshot: SelectionSnapshot): string { return `${snapshot.path}:${snapshot.revision}:${snapshot.anchor}:${snapshot.head}`; }
 
@@ -162,7 +163,7 @@ export class EditorController {
     const continuing = this.current?.file === snapshot.file && selectionKey(this.current) === key;
     this.focusRequested = manual || (continuing && this.focusRequested);
     this.current = snapshot;
-    this.toolbar.update(toolbarModel(snapshot, this.host.store.value, this.host.t));
+    this.toolbar.update(toolbarModel(snapshot, this.host.store.value, this.host.t, this.host.store.history));
     this.toolbar.show();
     this.observer.observe(this.toolbar.root);
     this.measure();
@@ -203,23 +204,31 @@ export class EditorController {
     const result = formatSelection(snapshot, action, color);
     if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return { kind: 'rejected' }; }
     if (result.kind === 'noop') return { kind: 'unchanged' };
-    return this.commit(snapshot, result.plan, false);
+    const committed = this.commit(snapshot, result.plan, false);
+    if (committed.edited && (action === 'foreground' || action === 'background') && color !== undefined) this.host.store.recordColorUse(action, color);
+    return committed.outcome;
   }
 
-  private commit(snapshot: SelectionSnapshot, plan: EditPlan, link: boolean): ActionOutcome {
-    if (this.applying) return { kind: 'rejected' };
+  refreshHistory(): void {
+    if (!this.destroyed && this.current && this.toolbar.visible) {
+      this.toolbar.update(toolbarModel(this.current, this.host.store.value, this.host.t, this.host.store.history)); this.measure();
+    }
+  }
+
+  private commit(snapshot: SelectionSnapshot, plan: EditPlan, link: boolean): CommitResult {
+    if (this.applying) return { edited: false, outcome: { kind: 'rejected' } };
     this.applying = true;
     try {
       if (!applyEdit(this.view, snapshot, plan)) {
-        this.close('failed'); this.host.notify(this.host.t('failed')); return { kind: 'closed' };
+        this.close('failed'); this.host.notify(this.host.t('failed')); return { edited: false, outcome: { kind: 'closed' } };
       }
       if (link) this.close('linkApplied');
       else {
         const result = capture(this.view, this.host.app, this.host.store);
-        if (result.kind === 'ready') { this.current = result.snapshot; this.toolbar.update(toolbarModel(result.snapshot, this.host.store.value, this.host.t)); this.measure(); }
+        if (result.kind === 'ready') { this.current = result.snapshot; this.toolbar.update(toolbarModel(result.snapshot, this.host.store.value, this.host.t, this.host.store.history)); this.measure(); }
         else this.close('stale');
       }
-      return { kind: this.current ? 'applied' : 'closed' };
+      return { edited: true, outcome: { kind: this.current ? 'applied' : 'closed' } };
     } finally { this.applying = false; }
   }
 

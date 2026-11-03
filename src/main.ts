@@ -12,6 +12,7 @@ export default class HoverBarPlugin extends Plugin {
   private store!: PreferencesStore;
   private unloaded = false;
   private settingsTab: HoverBarSettingsTab | null = null;
+  private historyNotice: Notice | null = null;
   private readonly t = translator(getLanguage);
 
   override async onload(): Promise<void> {
@@ -23,9 +24,21 @@ export default class HoverBarPlugin extends Plugin {
     this.settingsTab = new HoverBarSettingsTab(this.app, this, this.store, this.t);
     this.addSettingTab(this.settingsTab);
     let lastStatus = this.store.status;
+    let historyWarned = false;
+    let lastHistoryStatus = this.store.historyStatus;
     this.register(this.store.subscribe(change => {
       if (change.kind === 'preferences' || !this.store.enabled) this.closeAll('modeChanged');
       if (change.kind === 'preferences' && change.eligibilityChanged) this.app.workspace.updateOptions();
+      if (change.kind === 'history') for (const controller of this.controllers) controller.refreshHistory();
+      if (this.store.historyStatus === 'ready') {
+        historyWarned = false; this.historyNotice?.hide(); this.historyNotice = null;
+      } else if (!historyWarned) {
+        historyWarned = true;
+        this.historyNotice = new Notice(this.t(this.store.historyStatus === 'conflict' ? 'historyConflict' : 'historySaveError'), 0);
+      } else if (lastHistoryStatus !== this.store.historyStatus) {
+        this.historyNotice?.setMessage(this.t(this.store.historyStatus === 'conflict' ? 'historyConflict' : 'historySaveError'));
+      }
+      lastHistoryStatus = this.store.historyStatus;
       if (lastStatus !== this.store.status && this.store.status !== 'ready') {
         new Notice(this.t(this.store.status === 'conflict' ? 'settingsConflict' : this.store.status));
       }
@@ -36,7 +49,7 @@ export default class HoverBarPlugin extends Plugin {
       if (!controller) new Notice(this.t('noSelection')); else controller.show(true);
     } });
     this.addCommand({ id: 'toggle-automatic-toolbar', name: this.t('toggleAutomatic'), callback: async () => {
-      if (!this.store.enabled) { new Notice(this.t(this.store.status === 'conflict' ? 'settingsConflict' : this.store.status === 'schemaError' ? 'schemaError' : 'loadError')); return; }
+      if (!this.store.canChangePreferences) { new Notice(this.t(this.store.enabled ? 'preferencesPaused' : this.store.status === 'conflict' ? 'settingsConflict' : this.store.status === 'schemaError' ? 'schemaError' : 'loadError')); return; }
       await this.store.set('automatic', !this.store.value.automatic);
       new Notice(this.t(this.store.value.automatic ? 'automaticOn' : 'automaticOff'));
     } });
@@ -51,5 +64,5 @@ export default class HoverBarPlugin extends Plugin {
 
   private closeAll(reason: CloseReason = 'outside'): void { for (const controller of this.controllers) controller.close(reason); }
   override async onExternalSettingsChange(): Promise<void> { if (this.store && !this.unloaded) await this.store.externalChange(); }
-  override onunload(): void { this.unloaded = true; this.settingsTab?.hide(); this.store?.destroy(); for (const controller of [...this.controllers]) controller.destroy(); }
+  override onunload(): void { this.unloaded = true; this.historyNotice?.hide(); this.settingsTab?.hide(); this.store?.destroy(); for (const controller of [...this.controllers]) controller.destroy(); }
 }

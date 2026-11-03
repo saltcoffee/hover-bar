@@ -142,37 +142,17 @@
 .hover-bar-note strong { font-weight: 550; }
 .hover-bar-note small { overflow: hidden; color: var(--hover-bar-muted); white-space: nowrap; text-overflow: ellipsis; }
 .hover-bar-hint, .hover-bar-notes p { margin: 8px 4px 2px; color: var(--hover-bar-muted); font-size: 11px; }
-.hover-bar-foreground-red { --hover-bar-swatch: #e05252; }
-.hover-bar-foreground-orange { --hover-bar-swatch: #c66b2b; }
-.hover-bar-foreground-yellow { --hover-bar-swatch: #9a7b16; }
-.hover-bar-foreground-green { --hover-bar-swatch: #388e5a; }
-.hover-bar-foreground-teal { --hover-bar-swatch: #2b8b8b; }
-.hover-bar-foreground-blue { --hover-bar-swatch: #3e80cc; }
-.hover-bar-foreground-purple { --hover-bar-swatch: #9461c9; }
-.hover-bar-foreground-gray { --hover-bar-swatch: #7f848e; }
-.hover-bar-background-red { --hover-bar-swatch: #f8d7da; }
-.hover-bar-background-orange { --hover-bar-swatch: #ffe3c2; }
-.hover-bar-background-yellow { --hover-bar-swatch: #fff3a3; }
-.hover-bar-background-green { --hover-bar-swatch: #d7edda; }
-.hover-bar-background-teal { --hover-bar-swatch: #ccebea; }
-.hover-bar-background-blue { --hover-bar-swatch: #d6e7ff; }
-.hover-bar-background-purple { --hover-bar-swatch: #e8dcf8; }
-.hover-bar-background-gray { --hover-bar-swatch: #e3e5e8; }
-/* Note colors are persisted content semantics; keep them independent of palette UI styling. */
-.hover-bar-text-foreground-red { color: #e05252; }
-.hover-bar-text-foreground-orange { color: #c66b2b; }
-.hover-bar-text-foreground-yellow { color: #9a7b16; }
-.hover-bar-text-foreground-green { color: #388e5a; }
-.hover-bar-text-foreground-teal { color: #2b8b8b; }
-.hover-bar-text-foreground-blue { color: #3e80cc; }
-.hover-bar-text-foreground-purple { color: #9461c9; }
-.hover-bar-text-foreground-gray { color: #7f848e; }
-.hover-bar-text-background-red { background-color: #f8d7da; }
-.hover-bar-text-background-orange { background-color: #ffe3c2; }
-.hover-bar-text-background-yellow { background-color: #fff3a3; }
-.hover-bar-text-background-green { background-color: #d7edda; }
-.hover-bar-text-background-teal { background-color: #ccebea; }
-.hover-bar-text-background-blue { background-color: #d6e7ff; }
-.hover-bar-text-background-purple { background-color: #e8dcf8; }
-.hover-bar-text-background-gray { background-color: #e3e5e8; }
+/* Note colors come from validated, canonical HEX values persisted in the note. */
+.hover-bar-color-foreground { color: var(--hover-bar-foreground); }
+.hover-bar-color-background { background-color: var(--hover-bar-background); }
+.hover-bar-palette[hidden] { display: none; }
+.hover-bar-layer .hover-bar-palette-heading { margin: 8px 0; font-size: 12px; color: var(--hover-bar-ink); }
+.hover-bar-custom-color { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; min-width: 0; }
+.hover-bar-custom-color label { font-size: 12px; }
+.hover-bar-layer .hover-bar-hex { width: 100%; min-width: 0; height: 32px; padding: 4px 6px; border: 1px solid #ffffff66; border-radius: 4px; background: var(--hover-bar-surface); color: var(--hover-bar-ink); }
+.hover-bar-color-sample { padding: 8px; border: 1px solid #ffffff66; border-radius: 4px; overflow-wrap: anywhere; font-size: 12px; }
+.hover-bar-color-error { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.hover-bar-color-error:empty { display: none; }
+.hover-bar-settings .hover-bar-history-settings { margin-top: 20px; }
+.hover-bar-settings .hover-bar-history-settings button { margin: 4px 8px 4px 0; }
 @media (prefers-reduced-motion: reduce) { .hover-bar-layer * { scroll-behavior: auto; } }

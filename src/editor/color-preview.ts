@@ -1,6 +1,6 @@
 import { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ViewUpdate } from '@codemirror/view';
 import { editorInfoField, editorLivePreviewField, MarkdownView } from 'obsidian';
-import { PALETTE } from '../formatting/colors';
+import { isCanonicalHex } from '../formatting/colors';
 import { parseFragment } from '../formatting/fragment';
 import { MAX_SOURCE } from '../formatting/types';
 import { inspectSyntax } from './context';
@@ -35,11 +35,12 @@ export function colorPreview(host: Host) {
               const from = line.from + match.index;
               if (!fragment || inspectSyntax(view.state, from, from + match[0].length) !== 'clear') continue;
               const classes = [];
+              const styles = [];
               for (const kind of ['foreground', 'background'] as const) {
-                const color = PALETTE.find(color => color[kind] === fragment[kind]);
-                if (color) classes.push(`hover-bar-text-${kind}-${color.id}`);
+                const color = fragment[kind];
+                if (isCanonicalHex(color)) { classes.push(`hover-bar-color-${kind}`); styles.push(`--hover-bar-${kind}:${color}`); }
               }
-              if (classes.length) marks.push(Decoration.mark({ class: classes.join(' ') }).range(from + fragment.contentFrom, from + fragment.contentTo));
+              if (classes.length) marks.push(Decoration.mark({ class: classes.join(' '), attributes: { style: styles.join(';') } }).range(from + fragment.contentFrom, from + fragment.contentTo));
             }
           }
           if (line.to === view.state.doc.length) break;

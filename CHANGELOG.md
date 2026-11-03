@@ -2,6 +2,29 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.5 — 2026-11-03
+
+### Added
+
+- Custom text and background colors with strict HEX input, a panel preview, and an explicit Apply action in English and Simplified Chinese.
+- Separate per-vault lists of the last five successfully applied text and background colors, with clear, retry, and reload controls.
+- Live Preview decorations for any supported canonical HEX color, preserving existing Markdown and single-span color output.
+
+### Changed
+
+- Migrate plugin data to schema 3 on the next explicit change or successful color use, preserving switches and toolbar layouts. Older plugin versions reject schema 3; keep a pre-upgrade plugin-data backup if downgrading.
+- Keep recent-color persistence, failures, and history-only conflicts independent of editor sessions and note undo history.
+- Preserve colors successfully applied while recent history reloads, including reuse of an unchanged history head, and save the latest combined result.
+- Support keyboard navigation between recent colors, presets, HEX input, Apply, and color removal, with composition-aware confirmation.
+- Hand focus to a connected control before an external history update removes the active swatch, while preserving retained swatches, HEX drafts, and caret positions.
+
+### Fixed
+
+- Keep the HEX input's composition-confirming Enter blocked through key repeats until key release.
+- Scroll the color panel body after layout so its initially focused swatch remains visible in short panes.
+- Update an existing recent-color notice when a save failure becomes an external conflict, preserving English and Chinese messages and dismissal state.
+- Describe repaired recent-color history accurately when valid colors are retained, and label failed preference-load actions as Retry in English and Simplified Chinese.
+
 ## 0.1.4 — 2026-10-30
 
 ### Added
