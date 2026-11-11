@@ -27,7 +27,7 @@ describe('custom HEX and immutable usage records', () => {
     }
     const result = formatFragment(located, 'word', 'foreground', A);
     expect(result.kind).toBe('edit');
-    if (result.kind === 'edit') expect(parseFragment(result.plan.insert)?.foreground).toBe(A);
+    if (result.kind === 'edit') expect(parseFragment(result.plan.changes[0]!.insert)?.foreground).toBe(A);
   });
   it('isolates kinds, deduplicates and caps recency without mutating snapshots', () => {
     const initial = copyHistory({ foreground: [A, B], background: [C] });

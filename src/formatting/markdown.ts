@@ -1,6 +1,15 @@
 import { isCanonicalHex } from './colors';
 import { htmlText, markdownText } from './text';
-import { MAX_SOURCE, type FormatAction, type Fragment, type FormatResult, type LocatedFragment, type Mark } from './types';
+import { MAX_SOURCE, type EditChange, type FormatAction, type FormatResult, type Fragment, type LocatedFragment, type Mark, type PlanSelection } from './types';
+
+export type MarkMode = 'add' | 'remove';
+
+/** Apply or remove one basic mark; returns null when the fragment is already in that state. */
+export function applyMark(fragment: Fragment, action: Mark, mode: MarkMode): Fragment | null {
+  const has = fragment.marks.includes(action);
+  if (mode === 'add' ? has : !has) return null;
+  return { ...fragment, marks: mode === 'add' ? [...fragment.marks, action] : fragment.marks.filter(mark => mark !== action) };
+}
 
 export function serialize(fragment: Fragment): { source: string; contentFrom: number; contentTo: number } {
   let prefix = fragment.leading;
@@ -24,28 +33,38 @@ export function serialize(fragment: Fragment): { source: string; contentFrom: nu
   return { source: prefix + text + suffix, contentFrom: prefix.length, contentTo: prefix.length + text.length };
 }
 
-export function formatFragment(located: LocatedFragment, source: string, action: FormatAction, color?: string): FormatResult {
-  if (!['bold', 'italic', 'strike', 'highlight', 'code', 'clearColors', 'foreground', 'background'].includes(action)) return { kind: 'unavailable', reason: 'invalidParameter' };
-  const original = located.fragment;
-  if (original.code && action !== 'code') return { kind: 'unavailable', reason: 'codeOnly' };
-  if (action === 'code' && (original.marks.length || original.foreground || original.background)) return { kind: 'unavailable', reason: 'plainOnly' };
-  let next: Fragment;
-  if (action === 'foreground' || action === 'background') {
-    if (color !== undefined && !isCanonicalHex(color)) return { kind: 'unavailable', reason: 'invalidParameter' };
-    if (original[action] === color) return { kind: 'noop' };
-    next = { ...original, [action]: color };
-  } else if (action === 'clearColors') {
-    if (!original.foreground && !original.background) return { kind: 'noop' };
-    next = { ...original, foreground: undefined, background: undefined };
-  } else if (action === 'code') {
-    next = { ...original, code: !original.code, plainSource: original.code ? undefined : original.plainSource };
-  } else {
-    const marks: Mark[] = original.marks.includes(action) ? original.marks.filter(mark => mark !== action) : [...original.marks, action];
-    next = { ...original, marks };
-  }
+function selectionFor(base: number, change: EditChange): PlanSelection {
+  return { anchor: base + change.from + change.contentFrom, head: base + change.from + change.contentTo };
+}
+
+function planFor(located: LocatedFragment, source: string, next: Fragment, base: number, line: number): FormatResult {
   const serialized = serialize(next);
   if (serialized.source.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong' };
   const expected = source.slice(located.from, located.to);
   if (serialized.source === expected) return { kind: 'noop' };
-  return { kind: 'edit', plan: { from: located.from, to: located.to, expected, insert: serialized.source, contentFrom: serialized.contentFrom, contentTo: serialized.contentTo } };
+  const change: EditChange = { line, from: located.from, to: located.to, expected, insert: serialized.source, contentFrom: serialized.contentFrom, contentTo: serialized.contentTo };
+  return { kind: 'edit', plan: { changes: [change], selection: selectionFor(base, change) } };
+}
+
+/** Single-fragment path used by colors, inline code, and direct callers. Marks are unified through planFormat. */
+export function formatFragment(located: LocatedFragment, source: string, action: FormatAction, color?: string, base = 0, line = 0): FormatResult {
+  if (!['bold', 'italic', 'strike', 'highlight', 'code', 'clearColors', 'foreground', 'background'].includes(action)) return { kind: 'unavailable', reason: 'invalidParameter' };
+  const original = located.fragment;
+  if (original.code && action !== 'code') return { kind: 'unavailable', reason: 'codeOnly' };
+  if (action === 'code' && (original.marks.length || original.foreground || original.background)) return { kind: 'unavailable', reason: 'plainOnly' };
+  if (action === 'bold' || action === 'italic' || action === 'strike' || action === 'highlight') {
+    const next = applyMark(original, action, original.marks.includes(action) ? 'remove' : 'add');
+    if (!next) return { kind: 'noop' };
+    return planFor(located, source, next, base, line);
+  }
+  if (action === 'foreground' || action === 'background') {
+    if (color !== undefined && !isCanonicalHex(color)) return { kind: 'unavailable', reason: 'invalidParameter' };
+    if (original[action] === color) return { kind: 'noop' };
+    return planFor(located, source, { ...original, [action]: color }, base, line);
+  }
+  if (action === 'clearColors') {
+    if (!original.foreground && !original.background) return { kind: 'noop' };
+    return planFor(located, source, { ...original, foreground: undefined, background: undefined }, base, line);
+  }
+  return planFor(located, source, { ...original, code: !original.code, plainSource: original.code ? undefined : original.plainSource }, base, line);
 }

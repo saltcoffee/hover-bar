@@ -4,7 +4,7 @@ import type { ActionId, LayoutView } from '../toolbar/layout';
 export type FormatId = 'bold' | 'italic' | 'strike' | 'code' | 'highlight' | 'foreground' | 'background' | 'clearColors';
 export type ToolbarId = ActionId | 'more';
 export type PaletteKind = 'foreground' | 'background';
-export interface ActionView { readonly enabled: boolean; readonly pressed?: boolean; readonly reason?: string }
+export interface ActionView { readonly enabled: boolean; readonly pressed?: boolean; readonly mixed?: boolean; readonly reason?: string }
 export interface SwatchView extends ActionView { readonly id: string; readonly color: string; readonly label: string }
 export interface ToolbarViewModel {
   readonly layout: LayoutView;

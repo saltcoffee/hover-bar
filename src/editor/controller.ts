@@ -16,6 +16,10 @@ import { toolbarModel } from './toolbar-model';
 export type CloseReason = 'dismiss' | 'linkApplied' | 'stale' | 'outside' | 'windowBlur' | 'modeChanged' | 'noSpace' | 'failed' | 'destroy';
 interface CommitResult { readonly edited: boolean; readonly outcome: ActionOutcome }
 
+// When one endpoint of a long selection is off-screen, keep the visual span only while it stays
+// below this fraction of the visible pane; otherwise anchor on the visible endpoint.
+const MAX_VISIBLE_SPAN_RATIO = 0.5;
+
 function selectionKey(snapshot: SelectionSnapshot): string { return `${snapshot.path}:${snapshot.revision}:${snapshot.anchor}:${snapshot.head}`; }
 
 export interface Host {
@@ -235,7 +239,8 @@ export class EditorController {
   private quickLink(): void {
     const snapshot = this.validate();
     if (!snapshot) return;
-    const text = snapshot.located.fragment.text;
+    if (snapshot.lines.length > 1) { this.host.notify(this.host.t('multiLineDisabled')); return; }
+    const text = snapshot.lines[0]!.located.fragment.text;
     const result = linkSelection(snapshot, text);
     if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return; }
     const matches = this.host.app.vault.getMarkdownFiles().filter(file => file.basename === text);
@@ -298,13 +303,26 @@ export class EditorController {
         const to = this.view.coordsAtPos(Math.max(this.current.anchor, this.current.head), -1);
         const pane = this.view.scrollDOM.getBoundingClientRect();
         const size = this.toolbar.root.getBoundingClientRect();
-        if (!from || !to) return null;
         const screen = viewportBounds(this.window.innerWidth, this.window.innerHeight, this.window.visualViewport);
         const bounds = { left: Math.max(screen.left, pane.left), right: Math.min(screen.right, pane.right), top: Math.max(screen.top, pane.top), bottom: Math.min(screen.bottom, pane.bottom) };
+        const intersects = (box: { top: number; bottom: number }) => box.bottom > bounds.top && box.top < bounds.bottom;
+        const clamp = (box: { left: number; right: number; top: number; bottom: number }) => ({ left: box.left, right: box.right, top: Math.max(bounds.top, box.top), bottom: Math.min(bounds.bottom, box.bottom) });
         const head = this.current.anchor > this.current.head ? from : to;
-        const headVisible = head.top >= bounds.top && head.bottom <= bounds.bottom;
-        const anchor = { left: head.left, right: head.right, top: Math.max(bounds.top, Math.min(from.top, to.top)), bottom: Math.min(bounds.bottom, Math.max(from.bottom, to.bottom)) };
-        if (!headVisible) return null;
+        const tail = this.current.anchor > this.current.head ? to : from;
+        let anchor: { left: number; right: number; top: number; bottom: number } | null = null;
+        if (head && intersects(head)) {
+          if (tail) {
+            const union = { left: head.left, right: head.right, top: Math.max(bounds.top, Math.min(head.top, tail.top)), bottom: Math.min(bounds.bottom, Math.max(head.bottom, tail.bottom)) };
+            // Both endpoints on screen: keep the full span so placement can refuse to cover a large selection.
+            // One endpoint far off-screen: anchor on the visible head instead of collapsing to an unusable strip.
+            anchor = intersects(tail) || (union.bottom - union.top) <= (bounds.bottom - bounds.top) * MAX_VISIBLE_SPAN_RATIO ? union : clamp(head);
+          } else anchor = clamp(head);
+        } else if (tail && intersects(tail)) {
+          // Long selections: anchor on whichever endpoint is still visible instead of hiding.
+          anchor = clamp(tail);
+        }
+        if (!anchor) anchor = { left: bounds.left + 8, right: bounds.left + 8, top: bounds.top + 8, bottom: bounds.top + 8 };
+        if (!anchor) return null;
         const availableHeight = Math.max(anchor.top - bounds.top - 8, bounds.bottom - anchor.bottom - 8);
         measurement = this.toolbar.readLayout(bounds, availableHeight);
         return measurement.fits ? place(anchor, bounds, size.width, size.height) : null;

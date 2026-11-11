@@ -7,31 +7,64 @@ import { editableState, matchesSnapshot, type SelectionSnapshot } from './contex
 
 export const ownEdit = Annotation.define<boolean>();
 
-export function checkEditBudget(snapshot: Pick<SelectionSnapshot, 'lineLength'>, plan: EditPlan):
-  { readonly kind: 'available' } | { readonly kind: 'unavailable'; readonly reason: 'tooLong'; readonly stage: 'fragmentOutput' | 'resultLine' } {
-  if (plan.insert.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong', stage: 'fragmentOutput' };
-  if (snapshot.lineLength - (plan.to - plan.from) + plan.insert.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong', stage: 'resultLine' };
+export function checkPlanBudget(snapshot: SelectionSnapshot, plan: EditPlan):
+  { readonly kind: 'available' } | { readonly kind: 'unavailable'; readonly reason: 'tooLong' | 'invalidParameter' } {
+  if (snapshot.selectionLength > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong' };
+  for (const change of plan.changes) {
+    const segment = snapshot.lines[change.line];
+    if (!segment) return { kind: 'unavailable', reason: 'invalidParameter' };
+    if (change.insert.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong' };
+    if (segment.source.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong' };
+    if (segment.lineLength - (change.to - change.from) + change.insert.length > MAX_SOURCE) return { kind: 'unavailable', reason: 'tooLong' };
+  }
   return { kind: 'available' };
 }
 
 export function applyEdit(view: EditorView, snapshot: SelectionSnapshot, plan: EditPlan): boolean {
   const { state } = view;
-  const from = snapshot.base + plan.from;
-  const to = snapshot.base + plan.to;
-  if (!editableState(state) || view.composing || !matchesSnapshot(view, snapshot) ||
-    plan.from < 0 || plan.to < plan.from || plan.to > snapshot.source.length || from < 0 || to > state.doc.length ||
-    /[\r\n\0]/.test(plan.insert) || plan.insert === plan.expected || state.doc.sliceString(from, to) !== plan.expected) return false;
-  const line = state.doc.lineAt(from);
-  if (to > line.to || checkEditBudget({ lineLength: line.length }, plan).kind === 'unavailable') return false;
-  const start = from + plan.contentFrom;
-  const end = from + plan.contentTo;
+  if (!editableState(state) || view.composing || !matchesSnapshot(view, snapshot)) return false;
+  if (!plan.changes.length || checkPlanBudget(snapshot, plan).kind === 'unavailable') return false;
+
+  let previousTo = -1;
+  let totalDelta = 0;
+  const absolute: { from: number; to: number; insert: string }[] = [];
+  for (const change of plan.changes) {
+    const segment = snapshot.lines[change.line];
+    if (!segment) return false;
+    if (change.from < 0 || change.to < change.from || change.to > segment.source.length) return false;
+    const from = segment.base + change.from;
+    const to = segment.base + change.to;
+    if (from < previousTo || to > state.doc.length) return false;
+    if (/[\r\n\0]/.test(change.insert) || change.insert === change.expected) return false;
+    if (state.doc.sliceString(from, to) !== change.expected) return false;
+    if (to > segment.lineFrom + segment.lineLength) return false;
+    absolute.push({ from, to, insert: change.insert });
+    previousTo = to;
+    totalDelta += change.insert.length - (to - from);
+  }
+
+  const reverse = snapshot.anchor > snapshot.head;
+  const anchor = reverse ? plan.selection.head : plan.selection.anchor;
+  const head = reverse ? plan.selection.anchor : plan.selection.head;
+  const low = Math.min(anchor, head);
+  const high = Math.max(anchor, head);
+  if (low < 0 || high > state.doc.length + totalDelta) return false;
+
   view.dispatch({
-    changes: { from, to, insert: plan.insert },
-    selection: EditorSelection.single(snapshot.anchor > snapshot.head ? end : start, snapshot.anchor > snapshot.head ? start : end),
+    changes: absolute,
+    selection: EditorSelection.single(anchor, head),
     annotations: [ownEdit.of(true), isolateHistory.of('full'), Transaction.userEvent.of('input.hover-bar')],
   });
+
+  let delta = 0;
+  for (const change of plan.changes) {
+    const segment = snapshot.lines[change.line]!;
+    const from = segment.base + change.from + delta;
+    if (view.state.doc.sliceString(from, from + change.insert.length) !== change.insert) return false;
+    delta += change.insert.length - (change.to - change.from);
+  }
   const actual = view.state.selection.main;
-  return view.state.field(editorInfoField, false)?.file === snapshot.file && snapshot.file.path === snapshot.path &&
-    view.state.doc.sliceString(from, from + plan.insert.length) === plan.insert && view.state.selection.ranges.length === 1 &&
-    actual.anchor === (snapshot.anchor > snapshot.head ? end : start) && actual.head === (snapshot.anchor > snapshot.head ? start : end);
+  const info = view.state.field(editorInfoField, false);
+  return info?.file === snapshot.file && snapshot.file.path === snapshot.path &&
+    view.state.selection.ranges.length === 1 && actual.anchor === anchor && actual.head === head;
 }

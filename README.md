@@ -46,7 +46,7 @@ Click outside the toolbar or press Esc to close it. For keyboard access, use **S
 
 Requires desktop Obsidian **1.8.7 or later**, in Live Preview or Source mode. Mobile devices are not supported. Reading view does not show the toolbar.
 
-Use a single text fragment within one logical line, including text in a heading, list item, or blockquote. Keep structural markers outside your selection. Complex mixed formatting, partial HTML spans, multiple selections, tables, code blocks, math, and frontmatter will not be rewritten. Unsupported actions explain their limitation.
+Formatting applies to one text fragment within one logical line, or to a continuous selection of ordinary paragraph lines and blank lines. A single line may still include text in a heading, list item, or blockquote; a multi-line selection may not contain those structural lines. Keep structural markers outside your selection. Multi-line selections accept only bold, italic, strikethrough, and highlight; colors, inline code, and links remain single-line. Complex mixed formatting, partial HTML spans, multiple selections, tables, code blocks, math, and frontmatter will not be rewritten. Unsupported actions explain their limitation.
 
 Automatic selection quietly skips unsupported content. Open the toolbar manually or activate an unavailable action to learn why. Length protection checks the original selection, its full line, and the resulting line before writing. Select less text or split an overly long paragraph when needed.
 

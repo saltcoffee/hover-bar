@@ -58,8 +58,8 @@ function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, en
   } as unknown as EditorView;
   scenario.snapshot = {
     file, path: 'test.md', revision: 0,
-    anchor: reverse ? 14 : 10, head: reverse ? 10 : 14, base: 0,
-    lineLength: 14, source: 'word', located: locateFragment('word', 0, 4)!,
+    anchor: reverse ? 14 : 10, head: reverse ? 10 : 14, selectionLength: 4,
+    lines: [{ lineFrom: 0, base: 10, source: 'word', lineLength: 14, located: locateFragment('word', 0, 4)! }],
   };
   const notify = vi.fn();
   const store = new PreferencesStore({ load: async () => null, save: async () => {} });
@@ -141,6 +141,22 @@ describe('selection toolbar focus and placement', () => {
     const { controller, toolbar, flush } = setup({ left: 100, right: 100, top: 100, bottom: 120 }, { left: 450, right: 450, top: 240, bottom: 260 }, reverse);
     controller.show(true); flush();
     expect(toolbar.positioned).toHaveBeenCalledWith(reverse ? 8 : 240, 50);
+    controller.destroy();
+  });
+  it('anchors on the visible endpoint when a long selection head is off-screen', () => {
+    const { controller, toolbar, flush, view } = setup();
+    Object.defineProperty(view, 'coordsAtPos', { value: (position: number) => position === 14 ? null : { left: 100, right: 100, top: 100, bottom: 120 } });
+    controller.show(true); flush();
+    expect(toolbar.visible).toBe(true);
+    expect(toolbar.positioned).toHaveBeenCalledWith(8, 50);
+    controller.destroy();
+  });
+  it('still places the toolbar when both endpoints are off-screen', () => {
+    const { controller, toolbar, flush, view } = setup();
+    Object.defineProperty(view, 'coordsAtPos', { value: () => null });
+    controller.show(true); flush();
+    expect(toolbar.visible).toBe(true);
+    expect(toolbar.positioned).toHaveBeenCalledWith(8, 16);
     controller.destroy();
   });
   it('places below the visible selection when its start has scrolled above the pane', () => {
@@ -249,7 +265,8 @@ describe('diagnosis, cancellation and focus return', () => {
   it.each([
     [{ kind: 'readOnly' }, 'readOnly'], [{ kind: 'composing' }, 'composing'],
     [{ kind: 'multipleSelections' }, 'multipleSelections'], [{ kind: 'emptySelection' }, 'emptySelection'],
-    [{ kind: 'multipleLines' }, 'multipleLines'], [{ kind: 'syntaxPending' }, 'syntaxPending'],
+    [{ kind: 'tooManyLines' }, 'tooManyLines'], [{ kind: 'multiLineStructure' }, 'multiLineStructure'],
+    [{ kind: 'multiLineUnsafe' }, 'multiLineUnsafe'], [{ kind: 'syntaxPending' }, 'syntaxPending'],
     [{ kind: 'protectedSyntax' }, 'protectedSyntax'], [{ kind: 'unsupportedFragment' }, 'unsupported'],
     [{ kind: 'tooLong', stage: 'line' }, 'tooLong'], [{ kind: 'modeDisabled', mode: 'source' }, 'modeDisabled'],
     [{ kind: 'preferences', status: 'conflict' }, 'settingsConflict'],

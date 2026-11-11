@@ -8,7 +8,8 @@ export function selectionFeedback(reason: SelectionRejection): TextKey {
   const keys = {
     noEditor: 'noSelection', modeDisabled: 'modeDisabled', readOnly: 'readOnly', composing: 'composing',
     multipleSelections: 'multipleSelections', emptySelection: 'emptySelection', tooLong: 'tooLong',
-    multipleLines: 'multipleLines', syntaxPending: 'syntaxPending', protectedSyntax: 'protectedSyntax', unsupportedFragment: 'unsupported',
+    tooManyLines: 'tooManyLines', multiLineStructure: 'multiLineStructure', multiLineUnsafe: 'multiLineUnsafe',
+    syntaxPending: 'syntaxPending', protectedSyntax: 'protectedSyntax', unsupportedFragment: 'unsupported',
   } as const;
   return keys[reason.kind];
 }
