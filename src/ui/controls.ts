@@ -18,7 +18,9 @@ export function actionButton(document: Document, id: ToolbarId, t: Translate, me
 export function setActionState(button: HTMLButtonElement, state: ActionView, label: string): void {
   button.setAttribute('aria-disabled', String(!state.enabled));
   button.setAttribute('aria-label', !state.enabled && state.reason ? `${label} · ${state.reason}` : label);
-  if (state.pressed !== undefined) button.setAttribute('aria-pressed', String(state.pressed)); else button.removeAttribute('aria-pressed');
+  if (state.mixed) button.setAttribute('aria-pressed', 'mixed');
+  else if (state.pressed !== undefined) button.setAttribute('aria-pressed', String(state.pressed));
+  else button.removeAttribute('aria-pressed');
 }
 
 export function focusButton(button: HTMLElement | null | undefined): void { button?.focus({ preventScroll: true }); }

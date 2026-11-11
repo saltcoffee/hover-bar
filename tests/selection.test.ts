@@ -38,7 +38,7 @@ describe('selection diagnosis and precedence', () => {
   it('prioritizes selection length over real newlines and checks the entire input line', async () => {
     expect((await selectionFixture('a'.repeat(10_000) + '\nb')).capture()).toMatchObject({ reason: { kind: 'tooLong', stage: 'selection' } });
     expect((await selectionFixture('a'.repeat(10_001), { from: 2, to: 3 })).capture()).toMatchObject({ reason: { kind: 'tooLong', stage: 'line' } });
-    expect((await selectionFixture('one\ntwo')).capture()).toMatchObject({ reason: { kind: 'multipleLines' } });
+    expect((await selectionFixture('one\ntwo')).capture().kind).toBe('ready');
   });
   it('separates pending parsing, known protected syntax, structural prefixes and unsupported fragments', async () => {
     const pending = await selectionFixture('word', { pending: true });
@@ -55,7 +55,47 @@ describe('selection diagnosis and precedence', () => {
       const fixture = await selectionFixture(text, { from, to, reverse: true });
       const result = fixture.capture(); expect(result.kind).toBe('ready');
       if (result.kind !== 'ready') throw Error('No snapshot');
-      expect(result.snapshot.lineLength).toBe(text.length); expect(result.snapshot.anchor).toBe(to);
+      expect(result.snapshot.lines[0]!.lineLength).toBe(text.length); expect(result.snapshot.anchor).toBe(to);
       expect(result.snapshot.head).toBe(from); expect(fixture.dispatches).toBe(0);
     });
+});
+
+describe('multi-line selection capture', () => {
+  it('accepts ordinary paragraphs and blank lines', async () => {
+    const fixture = await selectionFixture('甲\n\n乙');
+    const result = fixture.capture();
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') throw Error('No snapshot');
+    expect(result.snapshot.lines.map(line => line.source)).toEqual(['甲', '乙']);
+  });
+  it('excludes a line when the selection ends at that line start', async () => {
+    const fixture = await selectionFixture('甲\n乙', { from: 0, to: 2 });
+    const result = fixture.capture();
+    if (result.kind !== 'ready') throw Error('No snapshot');
+    expect(result.snapshot.lines).toHaveLength(1);
+    expect(result.snapshot.lines[0]!.source).toBe('甲');
+  });
+  it.each([
+    ['- item\nsecond', 'multiLineStructure'],
+    ['# title\nbody', 'multiLineStructure'],
+    ['<span style="color:#e05252">x</span>\ny', 'multiLineUnsafe'],
+    ['`x`\ny', 'multiLineUnsafe'],
+    ['[label](target)\ny', 'unsupportedFragment'],
+  ] as const)('rejects unsupported multi-line content: %s', async (text, kind) => {
+    expect((await selectionFixture(text)).capture()).toMatchObject({ kind: 'blocked', reason: { kind } });
+  });
+  it('rejects a multi-line selection whose selected source exceeds MAX_SOURCE', async () => {
+    const text = Array.from({ length: 100 }, () => 'a'.repeat(100)).join('\n');
+    expect((await selectionFixture(text)).capture()).toMatchObject({ kind: 'blocked', reason: { kind: 'tooLong', stage: 'selection' } });
+  });
+  it('rejects a boundary that would expand beyond the selected text', async () => {
+    const fixture = await selectionFixture('**a**\nb', { from: 2, to: 7 });
+    expect(fixture.capture()).toMatchObject({ kind: 'blocked', reason: { kind: 'unsupportedFragment' } });
+  });
+  it('accepts up to 100 logical lines and rejects more than 100', async () => {
+    const hundred = Array.from({ length: 100 }, () => 'x').join('\n');
+    expect((await selectionFixture(hundred)).capture().kind).toBe('ready');
+    const hundredOne = Array.from({ length: 101 }, () => 'x').join('\n');
+    expect((await selectionFixture(hundredOne)).capture()).toMatchObject({ kind: 'blocked', reason: { kind: 'tooManyLines' } });
+  });
 });

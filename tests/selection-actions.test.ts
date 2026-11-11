@@ -16,7 +16,7 @@ describe('whole-line budget shared by display and commit', () => {
     const snapshot = captured.snapshot;
     expect(formatSelection(snapshot, 'bold')).toEqual({ kind: 'unavailable', reason: 'tooLong' });
     expect(toolbarModel(snapshot, DEFAULTS, key => key).controls.bold).toMatchObject({ enabled: false, reason: 'tooLong' });
-    const unguarded = formatFragment(snapshot.located, snapshot.source, 'bold');
+    const unguarded = formatFragment(snapshot.lines[0]!.located, snapshot.lines[0]!.source, 'bold');
     if (unguarded.kind !== 'edit') throw Error('Expected a fragment plan');
     expect(applyEdit(fixture.view, snapshot, unguarded.plan)).toBe(false);
     expect(fixture.dispatches).toBe(0); expect(undo(fixture.view)).toBe(false);
@@ -36,7 +36,8 @@ describe('whole-line budget shared by display and commit', () => {
     const fixture = await selectionFixture('# ' + 'a'.repeat(9994), { from: 3, to: 4 });
     const captured = fixture.capture(); if (captured.kind !== 'ready') throw Error('No snapshot');
     const result = formatSelection(captured.snapshot, 'bold'); if (result.kind !== 'edit') throw Error('No plan');
-    expect(applyEdit(fixture.view, captured.snapshot, { ...result.plan, insert: 'a\nb' })).toBe(false);
+    const malformed = { changes: [{ ...result.plan.changes[0]!, insert: 'a\nb' }], selection: result.plan.selection };
+    expect(applyEdit(fixture.view, captured.snapshot, malformed)).toBe(false);
     expect(applyEdit(fixture.view, captured.snapshot, result.plan)).toBe(true); expect(fixture.view.state.doc.length).toBe(10_000);
   });
   it('protects the final transaction from composition or a changed selection count', async () => {
@@ -54,7 +55,7 @@ describe('whole-line budget shared by display and commit', () => {
     const captured = fixture.capture(); if (captured.kind !== 'ready') throw Error('No snapshot');
     const snapshot = captured.snapshot, model = toolbarModel(snapshot, DEFAULTS, key => key);
     expect(model.controls.link).toEqual({ enabled: false, reason: 'tooLong' });
-    expect(linkSelection(snapshot, snapshot.located.fragment.text)).toEqual({ kind: 'unavailable', reason: 'tooLong' });
+    expect(linkSelection(snapshot, snapshot.lines[0]!.located.fragment.text)).toEqual({ kind: 'unavailable', reason: 'tooLong' });
     // A note-picker target is still unknown; each actual candidate is checked separately.
     expect(model.controls.chooseNote).toEqual({ enabled: true });
     expect(fixture.dispatches).toBe(0); expect(undo(fixture.view)).toBe(false);
@@ -65,7 +66,7 @@ describe('whole-line budget shared by display and commit', () => {
     const captured = fixture.capture(); if (captured.kind !== 'ready') throw Error('No snapshot');
     const snapshot = captured.snapshot;
     expect(toolbarModel(snapshot, DEFAULTS, key => key).controls.link).toEqual({ enabled: true });
-    const result = linkSelection(snapshot, snapshot.located.fragment.text); if (result.kind !== 'edit') throw Error('No link plan');
+    const result = linkSelection(snapshot, snapshot.lines[0]!.located.fragment.text); if (result.kind !== 'edit') throw Error('No link plan');
     expect(applyEdit(fixture.view, snapshot, result.plan)).toBe(true); expect(fixture.view.state.doc.length).toBe(10_000);
     expect(undo(fixture.view)).toBe(true); expect(fixture.view.state.doc.toString()).toBe(source);
   });
@@ -79,7 +80,7 @@ describe('link and action rejection reasons', () => {
   it('distinguishes invalid targets, fragment output and resulting-line limits', async () => {
     const fixture = await selectionFixture('a'.repeat(9997)); const result = fixture.capture(); if (result.kind !== 'ready') throw Error('No snapshot');
     expect(linkSelection(result.snapshot, 'bad#target')).toEqual({ kind: 'unavailable', reason: 'invalidTarget' });
-    expect(linkSelection(result.snapshot, result.snapshot.located.fragment.text)).toEqual({ kind: 'unavailable', reason: 'tooLong' });
+    expect(linkSelection(result.snapshot, result.snapshot.lines[0]!.located.fragment.text)).toEqual({ kind: 'unavailable', reason: 'tooLong' });
     const short = await selectionFixture('a'.repeat(9999), { from: 1, to: 2 }); const selected = short.capture(); if (selected.kind !== 'ready') throw Error('No snapshot');
     expect(linkSelection(selected.snapshot, 'note')).toEqual({ kind: 'unavailable', reason: 'tooLong' });
   });

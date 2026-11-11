@@ -2,6 +2,27 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.6 — 2026-11-11
+
+### Added
+
+- Multi-line formatting for a continuous selection of ordinary paragraph lines and blank lines, applying bold, italic, strikethrough, or highlight to each non-empty segment in one undoable transaction.
+- Three-state toolbar feedback for multi-line selections: all lines, none, or only some lines carry the format, exposed with `aria-pressed="mixed"`.
+
+### Changed
+
+- Apply multi-line changes all-or-nothing: any unsupported segment rejects the whole operation before writing, and the updated selection is mapped back over the formatted content.
+- Multi-line selections accept only ordinary paragraph text; headings, lists, tasks, quotes, tables, code, math, YAML, links, inline HTML, colors, and mixed formatting are rejected with an explicit reason.
+- Colors, inline code, and internal links are disabled for multi-line selections and explain why; single-line behavior is unchanged.
+- Add clearer rejection messages for too many lines, structural lines, and unsafe multi-line content.
+- Use a bounded syntax lookahead for long selections and compute multi-line mark availability without rebuilding a full plan, keeping large selections responsive.
+
+### Fixed
+
+- Keep the toolbar open after a multi-line apply by mapping the selection to whole formatted segments, so a second click can remove the format.
+- Anchor the toolbar on the visible endpoint of a long multi-line selection instead of letting it disappear when the selection extends beyond the viewport.
+- Keep single-line selection on the visible text after applying a mark, and announce the partial multi-line state in the button label.
+
 ## 0.1.5 — 2026-11-03
 
 ### Added

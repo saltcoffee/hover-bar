@@ -13,7 +13,7 @@ function apply(source: string, action: FormatAction, color?: string): string {
   if (result.kind === 'noop') return source;
   expect(result.kind).toBe('edit');
   if (result.kind !== 'edit') throw new Error('No edit');
-  return result.plan.insert;
+  return result.plan.changes[0]!.insert;
 }
 
 describe('single-fragment formatting', () => {
@@ -126,7 +126,9 @@ describe('single-fragment formatting', () => {
 describe('internal links', () => {
   it('preserves display text and surrounding whitespace', () => {
     const source = ' term ';
-    expect(linkPlan(locateFragment(source, 0, source.length)!, source, 'folder/note')).toMatchObject({ kind: 'edit', plan: { insert: ' [[folder/note|term]] ' } });
+    const result = linkPlan(locateFragment(source, 0, source.length)!, source, 'folder/note');
+    if (result.kind !== 'edit') throw Error('Expected link plan');
+    expect(result.plan.changes[0]!.insert).toBe(' [[folder/note|term]] ');
   });
   it.each(['bad|alias', 'bad#heading', 'bad]target', 'bad\nline'])('rejects ambiguous link syntax: %s', target => {
     expect(linkPlan(locateFragment('term', 0, 4)!, 'term', target)).toEqual({ kind: 'unavailable', reason: 'invalidTarget' });

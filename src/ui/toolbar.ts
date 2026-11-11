@@ -53,9 +53,10 @@ export class Toolbar {
 
   update(model: ToolbarViewModel): void {
     this.model = model;
+    const label = (id: ToolbarId) => model.controls[id].mixed ? `${this.t(id)} · ${this.t('partialApplied')}` : this.t(id);
     for (const [id, button] of this.controls) {
-      setActionState(button, model.controls[id], this.t(id));
-      setActionState(this.samples.get(id)!, model.controls[id], this.t(id));
+      setActionState(button, model.controls[id], label(id));
+      setActionState(this.samples.get(id)!, model.controls[id], label(id));
     }
     this.panels.update(model); this.expanded(); this.roving();
   }
