@@ -10,3 +10,11 @@ export const editorLivePreviewField = StateField.define<boolean>({ create: () =>
 export class MarkdownView { editor = {} as Editor; getMode(): string { return 'source'; } }
 export class Scope { register(): void {} }
 export function setIcon(element: HTMLElement, name: string): void { element.textContent = name.slice(0, 1); }
+export function parseFrontMatterAliases(frontmatter: unknown): string[] | null {
+  if (!frontmatter || typeof frontmatter !== 'object') return null;
+  const value = (frontmatter as Record<string, unknown>).aliases;
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string');
+  return null;
+}

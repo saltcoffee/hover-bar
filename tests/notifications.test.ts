@@ -33,7 +33,7 @@ beforeEach(() => { fixture.disk = encodeSettings(DEFAULTS); fixture.fail = true;
 
 async function setup(language: string) {
   fixture.language = language;
-  const app = { workspace: { on: vi.fn(), updateOptions: vi.fn() }, vault: { on: vi.fn() } } as unknown as App;
+  const app = { workspace: { on: vi.fn(), updateOptions: vi.fn() }, vault: { on: vi.fn() }, metadataCache: { on: vi.fn() } } as unknown as App;
   const plugin = new HoverBarPlugin(app, {} as PluginManifest); await plugin.onload();
   return plugin;
 }

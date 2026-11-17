@@ -91,8 +91,9 @@ async function mount(options: FixtureOptions = {}): Promise<void> {
       },
       explain: reason => events.push({ type: 'explain', action: reason }),
       quickLink: () => { events.push({ type: 'quickLink' }); toolbar!.notePicker(); },
-      notes: async () => [{ name: 'Concept', path: 'Concept.md' }],
-      selectNote: path => { events.push({ type: 'selectNote', action: path }); toolbar!.hide(); },
+      notes: async () => ({ kind: 'ready', resultId: 'fixture', items: [{ name: 'Concept', path: 'Concept.md' }], matchedCount: 1, hasMore: false }),
+      selectNote: selection => { events.push({ type: 'selectNote', action: selection.path }); toolbar!.hide(); },
+      cancelNoteRequests: () => {},
       close: () => { events.push({ type: 'close' }); toolbar!.hide(); },
       resize: () => { if (toolbar) layout(width); },
     });
@@ -119,7 +120,10 @@ async function mountController(options: FixtureOptions): Promise<void> {
   await store.load();
   if (options.pinned) await store.setLayout({ kind: 'custom', pinned: options.pinned });
   saveFailure = options.saveFailure ?? false;
-  const host = { app, store, t, controllers: new Set<EditorController>(), notify: (reason: string) => events.push({ type: 'notice', action: reason }) };
+  const host = {
+    app, store, t, controllers: new Set<EditorController>(), notify: (reason: string) => events.push({ type: 'notice', action: reason }),
+    metadata: { currentEpoch: 0, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} },
+  };
   const facet = defineLanguageFacet();
   const language = new Language(facet, parser.configure({ props: [languageDataProp.add(type => type.isTop ? facet : undefined)] }));
   const editor = document.querySelector<HTMLElement>('#editor')!; editor.style.width = `${width}px`;

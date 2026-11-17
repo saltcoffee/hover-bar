@@ -5,16 +5,27 @@ import type { Translate } from '../i18n';
 import type { EditPlan, FormatAction } from '../formatting/types';
 import { PreferencesStore } from '../settings/store';
 import { Toolbar, type ToolbarMeasurement } from '../ui/toolbar';
-import type { ActionOutcome, NoteChoice } from '../ui/toolbar-types';
+import type { ActionOutcome, NoteChoice, NoteSearchResult, NoteSelection } from '../ui/toolbar-types';
 import { place, viewportBounds } from '../ui/position';
+import { exactTargetPaths, normalizeQuery, searchRecords, sortRecordsByPath, type NoteMatch } from '../links/note-search';
 import { applyEdit, ownEdit } from './apply-edit';
-import { capture, matchesSnapshot, type SelectionSnapshot } from './context';
+import { capture, matchesSnapshot, sameSelectionSession, type SelectionSnapshot } from './context';
 import { actionFeedback, selectionFeedback } from './feedback';
 import { formatSelection, linkSelection } from './selection-actions';
 import { toolbarModel } from './toolbar-model';
+import { metadataSignature, type NoteMetadataEntry, type NoteMetadataSource } from './note-metadata';
 
 export type CloseReason = 'dismiss' | 'linkApplied' | 'stale' | 'outside' | 'windowBlur' | 'modeChanged' | 'noSpace' | 'failed' | 'destroy';
 interface CommitResult { readonly edited: boolean; readonly outcome: ActionOutcome }
+
+/** One published search result: identifies the confirmation intent and the metadata it was built from. */
+interface NoteEvidence {
+  readonly resultId: string;
+  readonly request: number;
+  readonly sessionKey: string;
+  readonly epoch: number;
+  readonly entries: ReadonlyMap<string, { readonly file: TFile; readonly signature: string }>;
+}
 
 // When one endpoint of a long selection is off-screen, keep the visual span only while it stays
 // below this fraction of the visible pane; otherwise anchor on the visible endpoint.
@@ -23,7 +34,7 @@ const MAX_VISIBLE_SPAN_RATIO = 0.5;
 function selectionKey(snapshot: SelectionSnapshot): string { return `${snapshot.path}:${snapshot.revision}:${snapshot.anchor}:${snapshot.head}`; }
 
 export interface Host {
-  app: App; store: PreferencesStore; t: Translate;
+  app: App; store: PreferencesStore; t: Translate; metadata: NoteMetadataSource;
   controllers: Set<EditorController>;
   notify(message: string): void;
 }
@@ -41,9 +52,13 @@ export class EditorController {
   private readonly document: Document;
   private readonly window: Window;
   private readonly disposers: (() => void)[] = [];
-  private noteTargets = new Map<string, TFile>();
   private readonly scope: Scope;
   private scopeActive = false;
+  private noteRequest = 0;
+  private notesAbort: AbortController | null = null;
+  private noteEvidence: NoteEvidence | null = null;
+  private quickPending: { readonly query: string; readonly request: number } | null = null;
+  private readonly unsubscribeMetadata: () => void;
 
   constructor(readonly view: EditorView, private readonly host: Host) {
     this.document = view.dom.ownerDocument;
@@ -51,7 +66,8 @@ export class EditorController {
     this.toolbar = new Toolbar(this.document, host.t, {
       explain: reason => { if (this.validate()) this.host.notify(reason); },
       format: (action, color) => this.format(action, color), quickLink: () => this.quickLink(),
-      notes: (query, signal) => this.notes(query, signal), selectNote: path => this.selectNote(path),
+      notes: (query, signal) => this.notes(query, signal), selectNote: selection => this.selectNote(selection),
+      cancelNoteRequests: () => this.cancelNoteRequests(),
       close: () => this.close('dismiss'), resize: () => this.measure(),
     });
     this.scope = new Scope(host.app.scope);
@@ -106,6 +122,7 @@ export class EditorController {
       this.listen(this.window.visualViewport, 'scroll', () => this.measure());
     }
     this.listen(this.document, 'scroll', () => this.measure(), true);
+    this.unsubscribeMetadata = host.metadata.subscribe(() => this.onMetadataChanged());
     host.controllers.add(this);
   }
 
@@ -178,7 +195,7 @@ export class EditorController {
     const snapshot = this.current;
     if (snapshot && reason === 'dismiss') this.dismissed = selectionKey(snapshot);
     const returnFocus = (reason === 'dismiss' || reason === 'linkApplied') && this.toolbar.ownsFocus();
-    this.current = null; this.focusRequested = false; this.noteTargets.clear(); this.releaseScope();
+    this.current = null; this.focusRequested = false; this.cancelNoteRequests(); this.releaseScope();
     if (this.frame) this.window.cancelAnimationFrame(this.frame);
     this.frame = 0; this.observer.disconnect(); this.toolbar.hide();
     const file = this.view.state.field(editorInfoField, false)?.file;
@@ -236,60 +253,177 @@ export class EditorController {
     } finally { this.applying = false; }
   }
 
-  private quickLink(): void {
+  private quickLink(): void { void this.runQuickLink(); }
+
+  /** True when the live session still holds the same file and selection as the given snapshot. */
+  private isCurrent(snapshot: SelectionSnapshot): boolean {
+    return sameSelectionSession(this.current, snapshot);
+  }
+
+  private async runQuickLink(): Promise<void> {
     const snapshot = this.validate();
     if (!snapshot) return;
     if (snapshot.lines.length > 1) { this.host.notify(this.host.t('multiLineDisabled')); return; }
     const text = snapshot.lines[0]!.located.fragment.text;
-    const result = linkSelection(snapshot, text);
-    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return; }
-    const matches = this.host.app.vault.getMarkdownFiles().filter(file => file.basename === text);
-    if (matches.length > 1) { this.toolbar.notePicker(); return; }
-    if (matches[0]) this.selectNote(matches[0].path, matches[0]);
-    else {
-      if (this.host.app.metadataCache.getFirstLinkpathDest(text, snapshot.path)) {
-        this.toolbar.notePicker(); return;
-      }
-      this.commit(snapshot, result.plan, true);
+    // Qualification and the length lower bound are checked with the original text as target.
+    const pre = linkSelection(snapshot, text);
+    if (pre.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(pre.reason))); return; }
+    this.cancelNoteRequests();
+    const request = ++this.noteRequest;
+    const controller = new AbortController(); this.notesAbort = controller;
+    this.quickPending = { query: text, request };
+    const isValid = () => !this.destroyed && this.isCurrent(snapshot) && this.noteRequest === request && !controller.signal.aborted;
+    const result = await this.host.metadata.collect(controller.signal, isValid, () => new Promise<void>(resolve => this.window.setTimeout(resolve, 0)));
+    if (!isValid()) return;
+    if (this.quickPending?.request === request) this.quickPending = null;
+    if (result.kind !== 'ready') {
+      if (result.kind !== 'cancelled') this.toolbar.notePicker(text, result.kind === 'stale' ? 'stale' : undefined);
+      return;
     }
+    const queryKey = normalizeQuery(text);
+    const byPath = new Map(result.entries.map(entry => [entry.record.path, entry] as const));
+    const exact = exactTargetPaths(searchRecords(result.entries.map(entry => entry.record), queryKey), queryKey);
+    if (exact.length > 1) { this.toolbar.notePicker(text, 'conflict'); return; }
+    if (exact.length === 1) {
+      const entry = byPath.get(exact[0]!);
+      if (entry) this.commitTarget(snapshot, entry, result.epoch);
+      return;
+    }
+    let hostDest: TFile | null = null;
+    let resolverFailed = false;
+    try { hostDest = this.host.app.metadataCache.getFirstLinkpathDest(text, snapshot.path); } catch { resolverFailed = true; }
+    // A failed or inconclusive host lookup must not degrade into an unresolved link write.
+    if (resolverFailed) { this.toolbar.notePicker(text); return; }
+    // Keep the original selected text as the query so the picker can still show every match.
+    if (hostDest) { this.toolbar.notePicker(text); return; }
+    if (this.host.metadata.currentEpoch !== result.epoch) { this.toolbar.notePicker(text); return; }
+    this.commit(snapshot, pre.plan, true);
   }
 
-  private selectNote(path: string, expected = this.noteTargets.get(path)): void {
+  private selectNote(selection: NoteSelection): void {
     const snapshot = this.validate();
     if (!snapshot) return;
-    const file = this.host.app.vault.getFileByPath(path);
-    if (!file || file !== expected || file.extension !== 'md') { this.close('stale'); this.host.notify(this.host.t('stale')); return; }
-    const target = this.host.app.metadataCache.fileToLinktext(file, snapshot.path, true);
-    const result = linkSelection(snapshot, target);
-    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return; }
-    if (this.host.app.metadataCache.getFirstLinkpathDest(target, snapshot.path) !== file) {
-      this.host.notify(this.host.t('invalidLink')); return;
-    }
-    this.commit(snapshot, result.plan, true);
+    const evidence = this.noteEvidence;
+    if (!evidence || evidence.resultId !== selection.resultId || evidence.sessionKey !== selectionKey(snapshot)) { this.failCandidate(); return; }
+    if (this.host.metadata.currentEpoch !== evidence.epoch) { this.failCandidate(); return; }
+    const candidate = evidence.entries.get(selection.path);
+    if (!candidate) { this.failCandidate(); return; }
+    const file = this.host.app.vault.getFileByPath(selection.path);
+    if (!file || file !== candidate.file || file.extension !== 'md') { this.failCandidate(); return; }
+    const current = this.host.metadata.recordFor(file);
+    if (!current || metadataSignature(current) !== candidate.signature) { this.failCandidate(); return; }
+    const plan = this.linkPlanFor(snapshot, file);
+    if (plan) this.commit(snapshot, plan, true);
   }
 
-  private async notes(query: string, signal: AbortSignal): Promise<readonly NoteChoice[]> {
-    const session = this.current;
-    if (!session) return [];
-    const text = query.trim().toLocaleLowerCase();
-    const results: NoteChoice[] = [];
-    const targets = new Map<string, TFile>();
-    const files = this.host.app.vault.getMarkdownFiles();
-    for (let i = 0; i < files.length; i++) {
-      if (signal.aborted || this.current !== session || this.destroyed) return [];
-      const file = files[i]!;
-      if (file.path.toLocaleLowerCase().includes(text)) {
-        targets.set(file.path, file);
-        const target = this.host.app.metadataCache.fileToLinktext(file, session.path, true);
-        const result = linkSelection(session, target);
-        results.push({ path: file.path, name: file.basename, disabledReason: result.kind === 'unavailable' ? this.host.t(actionFeedback(result.reason)) : undefined });
-      }
-      if (results.length === 50) break;
-      if (i > 0 && i % 500 === 0) await new Promise<void>(resolve => this.window.setTimeout(resolve, 0));
+  /** Shared revalidation and commit for a freshly resolved exact target. */
+  private commitTarget(snapshot: SelectionSnapshot, entry: NoteMetadataEntry, epoch: number): void {
+    if (this.destroyed || !this.isCurrent(snapshot)) return;
+    if (this.host.metadata.currentEpoch !== epoch) { this.failCandidate(); return; }
+    const file = this.host.app.vault.getFileByPath(entry.record.path);
+    if (!file || file !== entry.file || file.extension !== 'md') { this.failCandidate(); return; }
+    const current = this.host.metadata.recordFor(file);
+    if (!current || metadataSignature(current) !== entry.signature) { this.failCandidate(); return; }
+    const plan = this.linkPlanFor(snapshot, file);
+    if (plan) this.commit(snapshot, plan, true);
+  }
+
+  private failCandidate(): void { this.close('stale'); this.host.notify(this.host.t('candidateStale')); }
+
+  private linkPlanFor(snapshot: SelectionSnapshot, file: TFile): EditPlan | null {
+    const target = this.host.app.metadataCache.fileToLinktext(file, snapshot.path, true);
+    const result = linkSelection(snapshot, target);
+    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return null; }
+    if (this.host.app.metadataCache.getFirstLinkpathDest(target, snapshot.path) !== file) {
+      this.host.notify(this.host.t('invalidLink')); return null;
     }
-    if (signal.aborted || this.current !== session || this.destroyed) return [];
-    this.noteTargets = targets;
-    return results;
+    return result.plan;
+  }
+
+  private async notes(query: string, signal: AbortSignal): Promise<NoteSearchResult> {
+    const session = this.current;
+    if (!session || this.destroyed) return { kind: 'cancelled' };
+    const request = ++this.noteRequest;
+    // A picker search supersedes any quick-link request that has not yet opened the picker.
+    this.quickPending = null;
+    const isValid = () => !this.destroyed && this.current === session && this.noteRequest === request && !signal.aborted;
+    const meta = await this.host.metadata.collect(signal, isValid, () => new Promise<void>(resolve => this.window.setTimeout(resolve, 0)));
+    if (!isValid()) return { kind: 'cancelled' };
+    if (meta.kind !== 'ready') {
+      if (meta.kind === 'pending') return { kind: 'pending' };
+      if (meta.kind === 'stale') return { kind: 'stale' };
+      if (meta.kind === 'error') return { kind: 'error' };
+      return { kind: 'cancelled' };
+    }
+    const queryKey = normalizeQuery(query);
+    const byPath = new Map(meta.entries.map(entry => [entry.record.path, entry] as const));
+    let pageEntries: NoteMetadataEntry[];
+    let items: NoteChoice[];
+    let matchedCount: number;
+    if (!queryKey) {
+      const ordered = sortRecordsByPath(meta.entries.map(entry => entry.record));
+      matchedCount = ordered.length;
+      pageEntries = ordered.slice(0, 50).map(record => byPath.get(record.path)!);
+      items = pageEntries.map(entry => this.choice(session, entry, null));
+    } else {
+      const matches = searchRecords(meta.entries.map(entry => entry.record), queryKey);
+      matchedCount = matches.length;
+      const page = matches.slice(0, 50);
+      pageEntries = page.map(match => byPath.get(match.path)!);
+      items = page.map(match => this.choice(session, byPath.get(match.path)!, match));
+    }
+    if (!isValid()) return { kind: 'cancelled' };
+    const resultId = `${request}:${meta.epoch}`;
+    const entries = new Map(pageEntries.map(entry => [entry.record.path, { file: entry.file, signature: entry.signature }] as const));
+    this.noteEvidence = { resultId, request, sessionKey: selectionKey(session), epoch: meta.epoch, entries };
+    return { kind: 'ready', resultId, items, matchedCount, hasMore: matchedCount > 50 };
+  }
+
+  private choice(session: SelectionSnapshot, entry: NoteMetadataEntry, match: NoteMatch | null): NoteChoice {
+    const target = this.host.app.metadataCache.fileToLinktext(entry.file, session.path, true);
+    const result = linkSelection(session, target);
+    return {
+      path: entry.record.path, name: entry.record.name, matchLabel: match ? this.matchLabel(match) : undefined,
+      disabledReason: result.kind === 'unavailable' ? this.host.t(actionFeedback(result.reason)) : undefined,
+    };
+  }
+
+  private matchLabel(match: NoteMatch): string {
+    switch (match.kind) {
+      case 'nameExact': return this.host.t('matchNameExact');
+      case 'namePrefix': return this.host.t('matchNamePrefix');
+      case 'nameContains': return this.host.t('matchNameContains');
+      case 'aliasExact':
+      case 'aliasPrefix':
+      case 'aliasContains': return this.host.t('matchAlias', { alias: match.matchedAlias ?? '' });
+      case 'pathContains': return this.host.t('matchPath');
+    }
+  }
+
+  cancelNoteRequests(): void {
+    this.noteRequest++;
+    if (this.notesAbort) { this.notesAbort.abort(); this.notesAbort = null; }
+    this.noteEvidence = null;
+    this.quickPending = null;
+  }
+
+  /** Called after a source note is renamed/deleted: end the session if it was the active note. */
+  handleExternalFileChange(...paths: string[]): void {
+    if (this.destroyed) return;
+    if (this.current && paths.includes(this.current.path)) this.close('stale');
+  }
+
+  private onMetadataChanged(): void {
+    if (this.destroyed) return;
+    this.noteEvidence = null;
+    this.notesAbort?.abort(); this.notesAbort = null;
+    const quick = this.quickPending;
+    if (quick) {
+      this.noteRequest++; this.quickPending = null;
+      if (this.current && this.toolbar.visible) this.toolbar.notePicker(quick.query, 'stale');
+      return;
+    }
+    if (this.toolbar.visible) this.toolbar.refreshNotes();
   }
 
   private measure(): void {
@@ -349,6 +483,7 @@ export class EditorController {
     if (this.destroyed) return;
     this.destroyed = true; this.stopDrag(); this.close('destroy'); this.toolbar.destroy();
     for (const dispose of this.disposers) dispose();
+    this.unsubscribeMetadata();
     this.host.controllers.delete(this);
   }
 }

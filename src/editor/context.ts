@@ -120,4 +120,14 @@ export function matchesSnapshot(view: EditorView, snapshot: SelectionSnapshot): 
     view.state.selection.ranges.length === 1 && selection.anchor === snapshot.anchor && selection.head === snapshot.head;
 }
 
+/**
+ * Two snapshots describe the same live session when they refer to the same file instance and the
+ * same revision, path, and selection. A freshly captured snapshot is a new object, so identity
+ * comparison is never sufficient.
+ */
+export function sameSelectionSession(current: SelectionSnapshot | null, snapshot: SelectionSnapshot): boolean {
+  return current !== null && current.file === snapshot.file && current.path === snapshot.path &&
+    current.revision === snapshot.revision && current.anchor === snapshot.anchor && current.head === snapshot.head;
+}
+
 export function editableState(state: EditorState): boolean { return !state.readOnly && state.facet(EditorView.editable); }

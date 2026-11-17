@@ -2,6 +2,31 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.7 — 2026-11-17
+
+### Added
+
+- Offline note search by name, full path, and frontmatter aliases, matching Chinese and English text without reading note bodies.
+- Deterministic result ordering: exact name matches, then exact alias matches, then name/alias prefix matches, then other contains matches, with same-priority results ordered by original path.
+- Search explanations for every result (exact name, name prefix, name contains, alias, or path) in English and Simplified Chinese, plus the matched alias and a disabled reason for targets that cannot be linked safely.
+- Quick-link decisions now share the picker's exact name/alias match set, so a note whose alias matches is linked instead of the first same-named file, and true conflicts open the picker.
+
+### Changed
+
+- Scan the complete note set before sorting and truncating to the first 50 results, instead of stopping at the 50th match, so high-priority targets late in the vault are still found.
+- The note picker opens with the original selected text as its initial query when quick-link needs confirmation, and reports loading, index-not-ready, empty, failed, stale, and truncated states with visible retry actions.
+- Confirming a note revalidates the search result identity, the target file instance, the current alias signature, and the final host link resolution before writing; path-unchanged alias changes and stale results are rejected without editing.
+- Note renames and deletes end only the affected session, while metadata changes invalidate open candidates and let the current picker search again.
+
+### Fixed
+
+- Use fixed lowercase normalization for queries, names, and aliases rather than locale-aware casing, keeping ordering stable across system locales.
+- Treat a missing or unreadable note cache as not-ready rather than as "no aliases", and keep a single-file duplicate name/alias hit from creating a false conflict.
+- Keep quick links working against a freshly captured snapshot instead of cancelling them, and treat a modified note as not-ready until a metadata re-index confirms it, so stale aliases cannot be auto-linked.
+- Migrate pending metadata waits across file and directory renames instead of adding waits a rename cannot clear, and require each observed modification to be confirmed so an older re-index notification cannot release a newer one.
+- Keep the original selected text as the picker query when the host can resolve a path, and never downgrade an unknown host resolution into an unresolved link.
+- Ignore directories in vault create/modify events so a folder named with a `.md` suffix cannot leave note search and quick links waiting for an index update that never arrives.
+
 ## 0.1.6 — 2026-11-11
 
 ### Added

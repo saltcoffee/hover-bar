@@ -141,6 +141,12 @@
 .hover-bar-note:hover, .hover-bar-note[aria-selected="true"] { background: var(--hover-bar-hover); }
 .hover-bar-note strong { font-weight: 550; }
 .hover-bar-note small { overflow: hidden; color: var(--hover-bar-muted); white-space: nowrap; text-overflow: ellipsis; }
+.hover-bar-note .hover-bar-match { color: var(--hover-bar-muted); font-size: 11px; }
+.hover-bar-note .hover-bar-note-reason { color: var(--text-error); font-size: 11px; }
+.hover-bar-notice { margin: 2px 4px 6px; color: var(--hover-bar-ink); font-size: 12px; }
+.hover-bar-notice:empty { display: none; }
+.hover-bar-truncated { margin: 4px; color: var(--hover-bar-muted); font-size: 11px; }
+.hover-bar-truncated:empty { display: none; }
 .hover-bar-hint, .hover-bar-notes p { margin: 8px 4px 2px; color: var(--hover-bar-muted); font-size: 11px; }
 /* Note colors come from validated, canonical HEX values persisted in the note. */
 .hover-bar-color-foreground { color: var(--hover-bar-foreground); }

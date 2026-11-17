@@ -1,7 +1,7 @@
 import type { Translate } from '../i18n';
 import { ACTION_IDS, fitLayout, type ActionId, type LayoutMetrics, type LayoutResult } from '../toolbar/layout';
 import { actionButton, focusButton, setActionState } from './controls';
-import { backState, expandedPanel, type PanelOrigin } from './panel-navigation';
+import { backState, expandedPanel, type NoteNotice, type PanelOrigin } from './panel-navigation';
 import { ToolbarPanels, type PanelGeometry } from './toolbar-panels';
 import type { Box } from './position';
 import type { FormatId, PaletteKind, ToolbarActions, ToolbarId, ToolbarViewModel } from './toolbar-types';
@@ -117,18 +117,19 @@ export class Toolbar {
     else this.format(id);
   }
 
-  private open(id: PaletteKind | 'chooseNote', origin: PanelOrigin): void {
+  private open(id: PaletteKind | 'chooseNote', origin: PanelOrigin, query = '', notice?: NoteNotice): void {
     this.bridgeFocus();
-    this.panels.setState(id === 'chooseNote' ? { kind: 'notes', origin } : { kind: 'palette', palette: id, origin });
+    this.panels.setState(id === 'chooseNote' ? { kind: 'notes', origin, initialQuery: query, notice } : { kind: 'palette', palette: id, origin });
     this.panelOpened();
   }
   private panelOpened(): void {
     this.spaceFeedback = true; this.expanded(); this.panels.focus(); this.actions.resize();
   }
-  notePicker(): void {
+  notePicker(query = '', notice?: NoteNotice): void {
     const origin = this.lastActionOrigin ?? this.origin('chooseNote', this.visibleIds.includes('chooseNote') ? 'bar' : 'more');
-    this.open('chooseNote', origin);
+    this.open('chooseNote', origin, query, notice);
   }
+  refreshNotes(): boolean { return this.panels.refreshNotes(); }
 
   private format(id: FormatId, color?: string): void {
     const owned = this.ownsFocus();
