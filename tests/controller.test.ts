@@ -4,6 +4,7 @@ import type { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import { EditorController } from '../src/editor/controller';
+import type { NoteMetadataSource } from '../src/editor/note-metadata';
 import { editorInfoField, Scope as TestScope } from './support/obsidian';
 import type { CaptureResult, SelectionSnapshot } from '../src/editor/context';
 import { locateFragment } from '../src/formatting/fragment';
@@ -64,7 +65,11 @@ function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, en
   const notify = vi.fn();
   const store = new PreferencesStore({ load: async () => null, save: async () => {} });
   const keymap = { pushScope: vi.fn(), popScope: vi.fn() };
-  const controller = new EditorController(view, { app: { keymap } as unknown as App, store, t: key => key, controllers: new Set(), notify });
+  const metadata: NoteMetadataSource = {
+    currentEpoch: 0, subscribe: () => () => {}, recordFor: () => null,
+    collect: async () => ({ kind: 'pending' }), destroy: () => {},
+  };
+  const controller = new EditorController(view, { app: { keymap } as unknown as App, store, t: key => key, metadata, controllers: new Set(), notify });
   const flush = () => {
     const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(0));
     const pending = [...requests.values()]; requests.clear();

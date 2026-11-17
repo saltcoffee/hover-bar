@@ -18,7 +18,7 @@ The toolbar appears when you finish selecting text. Ordinary formatting stays in
 - Pin and reorder common actions per vault; unpinned actions and actions that do not fit stay available in **More**.
 - Bold, italic, strikethrough, inline code, and standard Obsidian highlights.
 - Named text and background colors, custom HEX input with a preview, and separate recent-color lists per vault.
-- Quick `[[internal links]]` and a picker for existing notes.
+- Quick `[[internal links]]` and a picker that searches note names, paths, and frontmatter aliases.
 - Undo and redo through the editor's normal history.
 - Light and dark theme support and keyboard navigation.
 - Chinese text when Obsidian uses a Chinese language setting; English for every other language.
@@ -51,6 +51,8 @@ Formatting applies to one text fragment within one logical line, or to a continu
 Automatic selection quietly skips unsupported content. Open the toolbar manually or activate an unavailable action to learn why. Length protection checks the original selection, its full line, and the resulting line before writing. Select less text or split an overly long paragraph when needed.
 
 Custom colors are saved as inline HTML. They remain in the note after disabling the plugin, but their appearance depends on the renderer and theme. Export tools may strip styles. Source mode shows the underlying markup, and Live Preview may reveal it while editing. The internal-link action intentionally writes wikilinks.
+
+**Link to an existing note** searches note names, full vault paths, and frontmatter `aliases` using only file metadata; it never reads note bodies, goes online, or builds a persistent index. Results are ordered by exact name matches, then exact aliases, then name or alias prefixes, then other name, alias, or path matches, with ties ordered by path. Each row shows its name, path, and why it matched, and rows that cannot be linked safely stay visible with an explanation. When quick linking finds more than one exact target, the picker opens with your selected text and asks you to choose rather than linking the first item. Confirming rechecks that the note still exists with the same aliases and that the final link resolves to it before anything is written.
 
 ## Custom and recent colors
 

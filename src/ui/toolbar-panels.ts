@@ -31,6 +31,9 @@ export class ToolbarPanels {
   get scrollTop(): number { return this.body.scrollTop; }
   get visible(): boolean { return this.state.kind !== 'none'; }
   setState(state: PanelState): void {
+    // Any transition away from note search abandons pending association work, including a quick
+    // link still resolving while a different panel opens.
+    if (state.kind !== 'notes') this.actions.cancelNoteRequests();
     this.picker?.cancel(); this.picker = null; this.palette?.dispose(); this.palette = null; this.state = state;
     this.body.replaceChildren(); this.menuRows.clear();
     this.root.hidden = state.kind === 'none';
@@ -39,7 +42,13 @@ export class ToolbarPanels {
     this.root.setAttribute('aria-label', this.t(state.kind === 'palette' ? state.palette : state.kind === 'notes' ? 'chooseNote' : 'more'));
     if (state.kind === 'more') { this.renderMore(); this.body.scrollTop = state.scrollTop; }
     else if (state.kind === 'palette' && this.model) this.palette = new ColorPalette(this.document, this.body, this.back, state.palette, this.t, this.actions, this.callbacks.apply, this.model);
-    else this.picker = new NotePicker(this.document, this.body, this.t, this.actions);
+    else if (state.kind === 'notes') this.picker = new NotePicker(this.document, this.body, this.t, this.actions, { initialQuery: state.initialQuery, notice: state.notice });
+  }
+
+  /** Re-run the open note search, if any, in place. Returns whether a search is visible. */
+  refreshNotes(): boolean {
+    if (this.state.kind !== 'notes' || !this.picker) return false;
+    this.picker.refresh(); return true;
   }
 
   update(model: ToolbarViewModel): void {

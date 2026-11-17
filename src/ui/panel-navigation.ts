@@ -4,11 +4,12 @@ import type { PaletteKind } from './toolbar-types';
 export type PanelOrigin =
   | { readonly kind: 'bar'; readonly actionId: ActionId }
   | { readonly kind: 'more'; readonly actionId: ActionId; readonly scrollTop: number };
+export type NoteNotice = 'conflict' | 'stale';
 export type PanelState =
   | { readonly kind: 'none' }
   | { readonly kind: 'more'; readonly scrollTop: number; readonly focusId?: ActionId }
   | { readonly kind: 'palette'; readonly palette: PaletteKind; readonly origin: PanelOrigin }
-  | { readonly kind: 'notes'; readonly origin: PanelOrigin };
+  | { readonly kind: 'notes'; readonly origin: PanelOrigin; readonly initialQuery?: string; readonly notice?: NoteNotice };
 
 export function backState(state: PanelState): PanelState {
   if ((state.kind === 'palette' || state.kind === 'notes') && state.origin.kind === 'more') {
