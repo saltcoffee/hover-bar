@@ -7,10 +7,13 @@ const ICONS: Readonly<Record<ToolbarId, string>> = {
   foreground: 'baseline', background: 'paint-bucket', link: 'link', chooseNote: 'chevron-down', clearColors: 'remove-formatting', more: 'ellipsis',
 };
 
-export function actionButton(document: Document, id: ToolbarId, t: Translate, menu = false): HTMLButtonElement {
-  const button = document.createElement('button'); button.type = 'button';
-  button.className = `hover-bar-button${menu ? ' hover-bar-menu-item' : ''}`;
-  button.dataset.action = id; button.setAttribute('aria-label', t(id));
+export function actionButton(container: Node, id: ToolbarId, t: Translate, menu = false): HTMLButtonElement {
+  const button = container.createEl('button', {
+    type: 'button',
+    cls: `hover-bar-button${menu ? ' hover-bar-menu-item' : ''}`,
+    attr: { 'aria-label': t(id) },
+  });
+  button.dataset.action = id;
   if (menu) button.textContent = t(id); else setIcon(button, ICONS[id]);
   return button;
 }

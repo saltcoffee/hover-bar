@@ -32,9 +32,17 @@ export function isActionId(value: unknown): value is ActionId {
 
 export function copyLayout(value: ToolbarLayout): ToolbarLayout {
   if (value.kind === 'default') return Object.freeze({ kind: 'default' });
-  if (value.kind !== 'custom' || !Array.isArray(value.pinned) ||
-      value.pinned.some(id => !isActionId(id)) || new Set(value.pinned).size !== value.pinned.length) throw new Error('Invalid toolbar layout');
-  return Object.freeze({ kind: 'custom', pinned: Object.freeze([...value.pinned]) });
+  if (value.kind !== 'custom') throw new Error('Invalid toolbar layout');
+  const raw: unknown = value.pinned;
+  if (!Array.isArray(raw)) throw new Error('Invalid toolbar layout');
+  const pinned: ActionId[] = [];
+  const seen = new Set<ActionId>();
+  for (const id of raw as readonly unknown[]) {
+    if (!isActionId(id) || seen.has(id)) throw new Error('Invalid toolbar layout');
+    seen.add(id);
+    pinned.push(id);
+  }
+  return Object.freeze({ kind: 'custom', pinned: Object.freeze(pinned) });
 }
 
 export function sameLayout(first: ToolbarLayout, second: ToolbarLayout): boolean {

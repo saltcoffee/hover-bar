@@ -2,6 +2,20 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 0.1.8 — 2026-11-20
+
+### Changed
+
+- Reuse a validated metadata snapshot across consecutive note-picker queries within the same selection session and metadata epoch, avoiding repeated full-vault metadata scans while keeping quick-link writes and candidate confirmation freshly verified against live host metadata.
+- Add declarative settings definitions (`getSettingDefinitions`, `getControlValue`, and `setControlValue`) for Obsidian 1.13+ settings search indexing while retaining the legacy `display()` fallback for Obsidian 1.8.7–1.12.x and routing all persistence through `PreferencesStore`.
+- Migrate all plugin UI and settings DOM construction from `document.createElement` to Obsidian's container DOM helpers (`createEl`, `createDiv`, and `createSpan`).
+
+### Fixed
+
+- Remove hover tooltips from note search result options so candidate rows remain unobscured while browsing.
+- Replace `!important` hidden rules and the `:has()` settings switch focus selector in `styles.css` with scoped specificity rules and an adjacent-sibling focus ring.
+- Narrow custom toolbar layout copying in `copyLayout` without unsafe `any` spread assignments, and bind the color palette apply callback to its receiver.
+
 ## 0.1.7 — 2026-11-17
 
 ### Added

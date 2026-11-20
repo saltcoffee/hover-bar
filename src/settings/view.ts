@@ -3,101 +3,119 @@ import { BOOLEAN_KEYS, type BooleanPreferenceKey } from './model';
 import { LayoutControls } from './layout-controls';
 import type { PreferencesStore, StoreChange } from './store';
 
+export interface StatusSectionHandle { refresh(): void }
+export interface HistorySectionHandle { refresh(): void }
+
+export function mountStatusSection(container: HTMLElement, store: PreferencesStore, t: Translate, focusFallback: () => void): StatusSectionHandle {
+  let lastLoad = store.loadCount;
+  const status = container.createEl('p', { cls: 'hover-bar-settings-status', attr: { role: 'status', 'aria-live': 'polite' } });
+  const recovery = container.createEl('p', { text: t('recovered') });
+  const retry = container.createEl('button', { type: 'button' });
+  retry.addEventListener('click', () => {
+    if (store.status === 'saveError' || (store.status === 'ready' && store.unsavedPreferences)) void store.save();
+    else void store.load();
+  });
+  const discard = container.createEl('p', { cls: 'hover-bar-reload-description', text: t('reloadDiscard') });
+  return {
+    refresh(): void {
+      const retryable = (store.status !== 'ready' || store.unsavedPreferences) && !store.loading;
+      if (!retryable && container.ownerDocument.activeElement === retry) focusFallback();
+      retry.hidden = !retryable;
+      retry.textContent = t(store.status === 'conflict' || store.status === 'schemaError' ? 'reload' : 'retry');
+      retry.disabled = store.reading || store.saving || (store.enabled && !store.canChangePreferences);
+      recovery.hidden = !store.recovered;
+      const reloaded = store.loadCount !== lastLoad;
+      lastLoad = store.loadCount;
+      const key = store.loading ? 'loadingPreferences' : store.status === 'conflict' ? 'settingsConflict'
+        : store.status !== 'ready' ? store.status : store.saving && store.unsavedPreferences ? 'saving'
+        : store.unsavedPreferences ? 'preferencesPending' : reloaded ? 'reloaded' : 'saved';
+      status.textContent = t(key);
+      retry.setAttribute('aria-description', store.status === 'conflict' ? t('reloadDiscard') : '');
+      discard.hidden = store.status !== 'conflict';
+    },
+  };
+}
+
+export function mountHistorySection(container: HTMLElement, store: PreferencesStore, t: Translate): HistorySectionHandle {
+  const historyRoot = container.createEl('section', { cls: 'hover-bar-history-settings' });
+  historyRoot.createEl('h3', { text: t('recentColors') });
+  const historyStatus = historyRoot.createEl('p', { attr: { role: 'status', 'aria-live': 'polite' } });
+  const historyRecovery = historyRoot.createEl('p', { text: t('historyRecovered') });
+  historyRoot.createEl('p', { text: t('clearHistoryDesc') });
+  const historyRetry = historyRoot.createEl('button', { type: 'button' });
+  historyRetry.addEventListener('click', () => {
+    if (store.historyStatus === 'conflict') void store.reloadHistory();
+    else void store.save();
+  });
+  const historyClear = historyRoot.createEl('button', { type: 'button', text: t('clearHistory') });
+  historyClear.addEventListener('click', () => { void store.clearColorHistory(); });
+  return {
+    refresh(): void {
+      historyRecovery.hidden = !store.historyRecovered;
+      historyClear.disabled = !store.canChangePreferences;
+      const historyRetryable = store.historyStatus !== 'ready' || store.unsavedHistory;
+      if (!historyRetryable && container.ownerDocument.activeElement === historyRetry) historyClear.focus({ preventScroll: true });
+      historyRetry.hidden = !historyRetryable;
+      historyRetry.textContent = t(store.historyStatus === 'conflict' ? 'reloadHistory' : 'retry');
+      historyRetry.disabled = store.reading || store.saving || !store.enabled;
+      historyRetry.setAttribute('aria-description', store.historyStatus === 'conflict' ? t('historyConflict') : '');
+      historyStatus.textContent = t(store.historyLoading ? 'historyLoading' : store.historyStatus === 'conflict' ? 'historyConflict'
+        : store.historyStatus === 'saveError' ? 'historySaveError' : store.saving && store.unsavedHistory ? 'historySaving'
+        : store.unsavedHistory ? 'historySaveError' : 'historySaved');
+    },
+  };
+}
+
 export class PreferencesView {
   private readonly layout: LayoutControls;
-  private readonly toggles = new Map<BooleanPreferenceKey, HTMLInputElement>();
-  private readonly status: HTMLParagraphElement;
-  private readonly recovery: HTMLParagraphElement;
-  private readonly retry: HTMLButtonElement;
+  private readonly toggles = new Map<BooleanPreferenceKey, { readonly input: HTMLInputElement; readonly track: HTMLSpanElement }>();
+  private readonly statusSection: StatusSectionHandle;
+  private readonly historySection: HistorySectionHandle;
   private readonly reset: HTMLButtonElement;
-  private readonly historyStatus: HTMLParagraphElement;
-  private readonly historyRecovery: HTMLParagraphElement;
-  private readonly historyRetry: HTMLButtonElement;
-  private readonly historyClear: HTMLButtonElement;
   private readonly unsubscribe: () => void;
-  private lastLoad: number;
 
   constructor(private readonly root: HTMLElement, private readonly store: PreferencesStore, private readonly t: Translate) {
-    const doc = root.ownerDocument;
     root.classList.add('hover-bar-settings');
-    this.lastLoad = store.loadCount;
-    this.status = doc.createElement('p'); this.status.className = 'hover-bar-settings-status'; this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
-    this.recovery = doc.createElement('p'); this.recovery.textContent = t('recovered');
-    this.retry = doc.createElement('button'); this.retry.type = 'button';
-    this.retry.addEventListener('click', () => { if (store.status === 'saveError' || (store.status === 'ready' && store.unsavedPreferences)) void store.save(); else void store.load(); });
-    root.append(this.status, this.recovery, this.retry);
+    this.statusSection = mountStatusSection(root, store, t, () => this.layout.focus());
     for (const key of BOOLEAN_KEYS) {
-      const row = doc.createElement('div'); row.className = 'setting-item mod-toggle';
-      const label = doc.createElement('label'); label.className = 'setting-item-info';
-      const name = doc.createElement('div'); name.className = 'setting-item-name'; name.textContent = t(key);
-      const description = doc.createElement('div'); description.className = 'setting-item-description'; description.textContent = t(`${key}Desc`);
-      const toggle = doc.createElement('input'); toggle.type = 'checkbox'; toggle.className = 'hover-bar-preference-toggle';
+      const row = root.createDiv({ cls: 'setting-item mod-toggle' });
+      const label = row.createEl('label', { cls: 'setting-item-info' });
+      label.createDiv({ cls: 'setting-item-name', text: t(key) });
+      label.createDiv({ cls: 'setting-item-description', text: t(`${key}Desc`) });
+      const control = row.createDiv({ cls: 'setting-item-control' });
+      const switchLabel = control.createEl('label', { cls: 'hover-bar-preference-switch' });
+      const toggle = switchLabel.createEl('input', { type: 'checkbox', cls: 'hover-bar-preference-toggle', attr: { 'aria-label': t(key) } });
       toggle.id = `hover-bar-preference-${key}`; label.htmlFor = toggle.id;
-      toggle.setAttribute('aria-label', t(key)); toggle.addEventListener('change', () => { void store.set(key, toggle.checked); });
-      const control = doc.createElement('div'); control.className = 'setting-item-control';
-      const switchLabel = doc.createElement('label'); switchLabel.className = 'checkbox-container hover-bar-preference-switch';
-      switchLabel.append(toggle); control.append(switchLabel);
-      label.append(name, description); row.append(label, control); root.append(row); this.toggles.set(key, toggle);
+      toggle.addEventListener('change', () => { void store.set(key, toggle.checked); });
+      const track = switchLabel.createSpan({ cls: 'checkbox-container hover-bar-preference-track', attr: { 'aria-hidden': 'true' } });
+      this.toggles.set(key, { input: toggle, track });
     }
-    const layoutRoot = doc.createElement('section'); root.append(layoutRoot);
+    const layoutRoot = root.createEl('section');
     this.layout = new LayoutControls(layoutRoot, store, t);
-    const historyRoot = doc.createElement('section'); historyRoot.className = 'hover-bar-history-settings';
-    const historyHeading = doc.createElement('h3'); historyHeading.textContent = t('recentColors');
-    this.historyStatus = doc.createElement('p'); this.historyStatus.setAttribute('role', 'status'); this.historyStatus.setAttribute('aria-live', 'polite');
-    this.historyRecovery = doc.createElement('p'); this.historyRecovery.textContent = t('historyRecovered');
-    const historyDescription = doc.createElement('p'); historyDescription.textContent = t('clearHistoryDesc');
-    this.historyRetry = doc.createElement('button'); this.historyRetry.type = 'button';
-    this.historyRetry.addEventListener('click', () => { if (store.historyStatus === 'conflict') void store.reloadHistory(); else void store.save(); });
-    this.historyClear = doc.createElement('button'); this.historyClear.type = 'button'; this.historyClear.textContent = t('clearHistory');
-    this.historyClear.addEventListener('click', () => { void store.clearColorHistory(); });
-    historyRoot.append(historyHeading, this.historyStatus, this.historyRecovery, historyDescription, this.historyRetry, this.historyClear); root.append(historyRoot);
-    const resetRow = doc.createElement('div'); resetRow.className = 'setting-item hover-bar-reset-row';
-    const resetInfo = doc.createElement('div'); resetInfo.className = 'setting-item-info';
-    const resetDescription = doc.createElement('div'); resetDescription.className = 'setting-item-description'; resetDescription.textContent = t('resetDesc');
-    const resetControl = doc.createElement('div'); resetControl.className = 'setting-item-control';
-    this.reset = doc.createElement('button'); this.reset.type = 'button'; this.reset.textContent = t('reset');
+    this.historySection = mountHistorySection(root, store, t);
+    const resetRow = root.createDiv({ cls: 'setting-item hover-bar-reset-row' });
+    const resetInfo = resetRow.createDiv({ cls: 'setting-item-info' });
+    resetInfo.createDiv({ cls: 'setting-item-description', text: t('resetDesc') });
+    const resetControl = resetRow.createDiv({ cls: 'setting-item-control' });
+    this.reset = resetControl.createEl('button', { type: 'button', text: t('reset') });
     this.reset.addEventListener('click', () => { void store.reset(); });
-    resetInfo.append(resetDescription); resetControl.append(this.reset); resetRow.append(resetInfo, resetControl); root.append(resetRow);
     this.unsubscribe = store.subscribe(change => this.refresh(change));
     this.refresh({ kind: 'preferences', eligibilityChanged: true, layoutChanged: true });
   }
 
   private refresh(change: StoreChange): void {
     if (change.kind === 'preferences') {
-      if (change.eligibilityChanged) for (const [key, toggle] of this.toggles) toggle.checked = this.store.value[key];
+      if (change.eligibilityChanged) for (const [key, entry] of this.toggles) entry.input.checked = this.store.value[key];
       if (change.layoutChanged) this.layout.update();
     }
-    for (const toggle of this.toggles.values()) {
-      toggle.disabled = !this.store.canChangePreferences;
-      toggle.parentElement!.className = `checkbox-container hover-bar-preference-switch${toggle.checked ? ' is-enabled' : ''}${toggle.disabled ? ' is-disabled' : ''}`;
+    for (const { input, track } of this.toggles.values()) {
+      input.disabled = !this.store.canChangePreferences;
+      track.className = `checkbox-container hover-bar-preference-track${input.checked ? ' is-enabled' : ''}${input.disabled ? ' is-disabled' : ''}`;
     }
-    this.layout.updateAvailability(); this.reset.disabled = !this.store.canChangePreferences;
-    const retryable = (this.store.status !== 'ready' || this.store.unsavedPreferences) && !this.store.loading;
-    if (!retryable && this.root.ownerDocument.activeElement === this.retry) this.layout.focus();
-    this.retry.hidden = !retryable;
-    this.retry.textContent = this.t(this.store.status === 'conflict' || this.store.status === 'schemaError' ? 'reload' : 'retry');
-    this.retry.disabled = this.store.reading || this.store.saving || (this.store.enabled && !this.store.canChangePreferences);
-    this.recovery.hidden = !this.store.recovered;
-    const reloaded = this.store.loadCount !== this.lastLoad;
-    this.lastLoad = this.store.loadCount;
-    const key = this.store.loading ? 'loadingPreferences' : this.store.status === 'conflict' ? 'settingsConflict'
-      : this.store.status !== 'ready' ? this.store.status : this.store.saving && this.store.unsavedPreferences ? 'saving' : this.store.unsavedPreferences ? 'preferencesPending' : reloaded ? 'reloaded' : 'saved';
-    this.status.textContent = this.t(key);
-    this.retry.setAttribute('aria-description', this.store.status === 'conflict' ? this.t('reloadDiscard') : '');
-    let discard = this.root.querySelector<HTMLParagraphElement>('.hover-bar-reload-description');
-    if (!discard) { discard = this.root.ownerDocument.createElement('p'); discard.className = 'hover-bar-reload-description'; this.retry.after(discard); }
-    discard.textContent = this.t('reloadDiscard'); discard.hidden = this.store.status !== 'conflict';
-    this.historyRecovery.hidden = !this.store.historyRecovered;
-    this.historyClear.disabled = !this.store.canChangePreferences;
-    const historyRetryable = this.store.historyStatus !== 'ready' || this.store.unsavedHistory;
-    if (!historyRetryable && this.root.ownerDocument.activeElement === this.historyRetry) this.historyClear.focus({ preventScroll: true });
-    this.historyRetry.hidden = !historyRetryable;
-    this.historyRetry.textContent = this.t(this.store.historyStatus === 'conflict' ? 'reloadHistory' : 'retry');
-    this.historyRetry.disabled = this.store.reading || this.store.saving || !this.store.enabled;
-    this.historyRetry.setAttribute('aria-description', this.store.historyStatus === 'conflict' ? this.t('historyConflict') : '');
-    this.historyStatus.textContent = this.t(this.store.historyLoading ? 'historyLoading' : this.store.historyStatus === 'conflict' ? 'historyConflict'
-      : this.store.historyStatus === 'saveError' ? 'historySaveError' : this.store.saving && this.store.unsavedHistory ? 'historySaving'
-      : this.store.unsavedHistory ? 'historySaveError' : 'historySaved');
+    this.layout.updateAvailability();
+    this.reset.disabled = !this.store.canChangePreferences;
+    this.statusSection.refresh();
+    this.historySection.refresh();
   }
 
   destroy(): void { this.unsubscribe(); }

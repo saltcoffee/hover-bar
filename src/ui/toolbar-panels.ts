@@ -21,28 +21,36 @@ export class ToolbarPanels {
   private menuRows = new Map<ActionId, HTMLButtonElement>();
   private palette: ColorPalette | null = null;
 
-  constructor(private readonly document: Document, private readonly t: Translate, private readonly actions: ToolbarActions, private readonly callbacks: Callbacks) {
-    this.root = document.createElement('div'); this.root.className = 'hover-bar-panel'; this.root.hidden = true;
-    this.back = document.createElement('button'); this.back.type = 'button'; this.back.className = 'hover-bar-button hover-bar-menu-item hover-bar-back'; this.back.textContent = t('back');
+  private readonly document: Document;
+
+  constructor(parent: HTMLElement, private readonly t: Translate, private readonly actions: ToolbarActions, private readonly callbacks: Callbacks) {
+    this.document = parent.ownerDocument;
+    this.root = parent.createDiv({ cls: 'hover-bar-panel' }); this.root.hidden = true;
+    this.back = this.root.createEl('button', { type: 'button', cls: 'hover-bar-button hover-bar-menu-item hover-bar-back', text: t('back') });
     this.back.addEventListener('click', () => callbacks.back());
-    this.body = document.createElement('div'); this.body.className = 'hover-bar-panel-body'; this.root.append(this.back, this.body);
+    this.body = this.root.createDiv({ cls: 'hover-bar-panel-body' });
   }
 
   get scrollTop(): number { return this.body.scrollTop; }
   get visible(): boolean { return this.state.kind !== 'none'; }
   setState(state: PanelState): void {
-    // Any transition away from note search abandons pending association work, including a quick
-    // link still resolving while a different panel opens.
-    if (state.kind !== 'notes') this.actions.cancelNoteRequests();
+    // Any panel transition abandons pending association work and clears any prior picker snapshot.
+    this.actions.cancelNoteRequests();
     this.picker?.cancel(); this.picker = null; this.palette?.dispose(); this.palette = null; this.state = state;
     this.body.replaceChildren(); this.menuRows.clear();
     this.root.hidden = state.kind === 'none';
     if (state.kind === 'none') return;
     this.root.setAttribute('role', state.kind === 'notes' ? 'dialog' : 'group');
-    this.root.setAttribute('aria-label', this.t(state.kind === 'palette' ? state.palette : state.kind === 'notes' ? 'chooseNote' : 'more'));
+    if (state.kind === 'notes') {
+      this.root.removeAttribute('aria-label');
+      this.picker = new NotePicker(this.body, this.t, this.actions, { initialQuery: state.initialQuery, notice: state.notice });
+      this.root.setAttribute('aria-labelledby', this.picker.labelId);
+      return;
+    }
+    this.root.removeAttribute('aria-labelledby');
+    this.root.setAttribute('aria-label', this.t(state.kind === 'palette' ? state.palette : 'more'));
     if (state.kind === 'more') { this.renderMore(); this.body.scrollTop = state.scrollTop; }
-    else if (state.kind === 'palette' && this.model) this.palette = new ColorPalette(this.document, this.body, this.back, state.palette, this.t, this.actions, this.callbacks.apply, this.model);
-    else if (state.kind === 'notes') this.picker = new NotePicker(this.document, this.body, this.t, this.actions, { initialQuery: state.initialQuery, notice: state.notice });
+    else if (state.kind === 'palette' && this.model) this.palette = new ColorPalette(this.document, this.body, this.back, state.palette, this.t, this.actions, (kind, color) => this.callbacks.apply(kind, color), this.model);
   }
 
   /** Re-run the open note search, if any, in place. Returns whether a search is visible. */
@@ -73,11 +81,11 @@ export class ToolbarPanels {
 
   private renderMore(): void {
     for (const id of this.overflow) {
-      const row = actionButton(this.document, id, this.t, true);
+      const row = actionButton(this.body, id, this.t, true);
       if (id === 'foreground' || id === 'background' || id === 'chooseNote') { row.setAttribute('aria-haspopup', id === 'chooseNote' ? 'dialog' : 'true'); row.classList.add('hover-bar-subpage'); }
-      row.addEventListener('click', () => this.callbacks.activate(id)); this.menuRows.set(id, row); this.body.append(row);
+      row.addEventListener('click', () => this.callbacks.activate(id)); this.menuRows.set(id, row);
     }
-    if (!this.overflow.length) { const empty = this.document.createElement('p'); empty.textContent = this.t('allVisible'); this.body.append(empty); }
+    if (!this.overflow.length) this.body.createEl('p', { text: this.t('allVisible') });
     if (this.model) this.update(this.model);
   }
 

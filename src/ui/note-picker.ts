@@ -9,26 +9,32 @@ export interface NotePickerOptions {
 }
 
 export class NotePicker {
+  readonly labelId: string;
   private abort: AbortController | null = null;
   private generation = 0;
   private disposed = false;
   private runSearch: () => Promise<void> = async () => {};
 
-  constructor(document: Document, panel: HTMLElement, t: Translate, actions: ToolbarActions, options: NotePickerOptions = {}) {
-    const input = document.createElement('input');
-    input.type = 'search'; input.placeholder = t('searchNotes'); input.setAttribute('aria-label', t('searchNotes'));
-    input.className = 'hover-bar-search';
+  constructor(panel: HTMLElement, t: Translate, actions: ToolbarActions, options: NotePickerOptions = {}) {
+    const input = panel.createEl('input', {
+      type: 'search',
+      cls: 'hover-bar-search',
+      placeholder: t('searchNotes'),
+      attr: { 'aria-label': t('searchNotes'), role: 'combobox', 'aria-expanded': 'true', 'aria-autocomplete': 'list' },
+    });
     if (options.initialQuery) input.value = options.initialQuery;
-    const list = document.createElement('div'); list.className = 'hover-bar-notes';
-    list.setAttribute('role', 'listbox'); list.setAttribute('aria-label', t('searchNotes'));
+    const list = panel.createDiv({ cls: 'hover-bar-notes', attr: { role: 'listbox' } });
     list.id = `hover-bar-notes-${Math.random().toString(36).slice(2)}`;
-    input.setAttribute('role', 'combobox'); input.setAttribute('aria-controls', list.id);
-    input.setAttribute('aria-expanded', 'true'); input.setAttribute('aria-autocomplete', 'list');
-    const truncated = document.createElement('div'); truncated.className = 'hover-bar-truncated';
-    const notice = document.createElement('div'); notice.className = 'hover-bar-notice';
+    input.setAttribute('aria-controls', list.id);
+    const truncated = panel.createDiv({ cls: 'hover-bar-truncated' });
+    const notice = panel.createDiv({ cls: 'hover-bar-notice' });
     if (options.notice === 'conflict') notice.textContent = t('conflictNotice');
     else if (options.notice === 'stale') notice.textContent = t('candidateStale');
-    const hint = document.createElement('div'); hint.className = 'hover-bar-hint'; hint.textContent = t('searchHint');
+    panel.createDiv({ cls: 'hover-bar-hint', text: t('searchHint') });
+    // Obsidian displays aria-label on hover, including labels on ancestors of a result.
+    const label = panel.createSpan({ text: t('chooseNote') }); label.hidden = true;
+    this.labelId = label.id = `${list.id}-label`;
+    list.setAttribute('aria-labelledby', label.id);
     let choices: readonly NoteChoice[] = []; let options2: HTMLElement[] = []; let active = 0; let resultId = '';
     let composing = false; let composingEnterHeld = false;
     const select = () => {
@@ -45,8 +51,8 @@ export class NotePicker {
       list.setAttribute('aria-busy', 'false'); list.textContent = text; active = 0; resultId = '';
       input.removeAttribute('aria-activedescendant'); truncated.textContent = '';
       if (retryable) {
-        const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = t('retry');
-        retry.addEventListener('click', () => { void search(); }); list.append(retry);
+        const retry = list.createEl('button', { type: 'button', text: t('retry') });
+        retry.addEventListener('click', () => { actions.cancelNoteRequests(); void search(); });
       }
       actions.resize();
     };
@@ -70,17 +76,15 @@ export class NotePicker {
       choices = result.items; resultId = result.resultId;
       list.setAttribute('aria-busy', 'false'); list.replaceChildren(); active = 0;
       for (const [index, note] of choices.entries()) {
-        const row = document.createElement('div'); row.className = 'hover-bar-note'; row.id = `${list.id}-${index}`;
-        row.setAttribute('role', 'option'); row.setAttribute('aria-disabled', String(!!note.disabledReason));
-        row.setAttribute('aria-label', [note.name, note.path, note.matchLabel, note.disabledReason].filter(Boolean).join(' · '));
-        const name = document.createElement('strong'); name.textContent = note.name;
-        const path = document.createElement('small'); path.textContent = note.path;
-        row.append(name, path);
-        if (note.matchLabel) { const match = document.createElement('span'); match.className = 'hover-bar-match'; match.textContent = note.matchLabel; row.append(match); }
-        if (note.disabledReason) { const reason = document.createElement('span'); reason.className = 'hover-bar-note-reason'; reason.textContent = note.disabledReason; row.append(reason); }
-        row.addEventListener('click', () => confirm(note)); list.append(row); options2.push(row);
+        const row = list.createDiv({ cls: 'hover-bar-note', attr: { role: 'option', 'aria-disabled': String(!!note.disabledReason) } });
+        row.id = `${list.id}-${index}`;
+        row.createEl('strong', { text: note.name });
+        row.createEl('small', { text: note.path });
+        if (note.matchLabel) row.createSpan({ cls: 'hover-bar-match', text: note.matchLabel });
+        if (note.disabledReason) row.createSpan({ cls: 'hover-bar-note-reason', text: note.disabledReason });
+        row.addEventListener('click', () => confirm(note)); options2.push(row);
       }
-      if (!choices.length) { const empty = document.createElement('p'); empty.textContent = t('noNotes'); list.append(empty); }
+      if (!choices.length) list.createEl('p', { text: t('noNotes') });
       truncated.textContent = result.hasMore ? t('truncated') : '';
       select(); actions.resize();
     };
@@ -103,7 +107,7 @@ export class NotePicker {
       }
     });
     this.runSearch = search;
-    panel.append(input, list, truncated, notice, hint); void search(); input.focus({ preventScroll: true }); actions.resize();
+    void search(); input.focus({ preventScroll: true }); actions.resize();
   }
 
   /** Re-run the current query, keeping the input value, caret and focus. */

@@ -150,4 +150,22 @@ describe('note metadata adapter', () => {
     expect(adapter.recordFor(file('missing.md'))).toBeNull();
     adapter.destroy();
   });
+  it('allows snapshot reuse only while layout is ready, pending is empty, epoch matches, and adapter is alive', () => {
+    const a = file('A.md');
+    const workspace = { layoutReady: true };
+    const app = { workspace, vault: { getMarkdownFiles: () => [a] }, metadataCache: { getFileCache: () => cache() } } as unknown as App;
+    const adapter = new NoteMetadata(app);
+    expect(adapter.canReuseSnapshot(0)).toBe(true);
+    expect(adapter.canReuseSnapshot(1)).toBe(false);
+    workspace.layoutReady = false;
+    expect(adapter.canReuseSnapshot(0)).toBe(false);
+    workspace.layoutReady = true;
+    adapter.fileModified(a.path);
+    expect(adapter.canReuseSnapshot(adapter.currentEpoch)).toBe(false);
+    adapter.fileChanged(a.path);
+    expect(adapter.canReuseSnapshot(adapter.currentEpoch)).toBe(true);
+    const epoch = adapter.currentEpoch;
+    adapter.destroy();
+    expect(adapter.canReuseSnapshot(epoch)).toBe(false);
+  });
 });

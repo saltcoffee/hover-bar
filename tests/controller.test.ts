@@ -4,7 +4,7 @@ import type { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import { EditorController } from '../src/editor/controller';
-import type { NoteMetadataSource } from '../src/editor/note-metadata';
+import { metadataSignature, type MetadataResult, type NoteMetadataEntry, type NoteMetadataSource } from '../src/editor/note-metadata';
 import { editorInfoField, Scope as TestScope } from './support/obsidian';
 import type { CaptureResult, SelectionSnapshot } from '../src/editor/context';
 import { locateFragment } from '../src/formatting/fragment';
@@ -66,7 +66,7 @@ function setup(start: Box = { left: 100, right: 100, top: 100, bottom: 120 }, en
   const store = new PreferencesStore({ load: async () => null, save: async () => {} });
   const keymap = { pushScope: vi.fn(), popScope: vi.fn() };
   const metadata: NoteMetadataSource = {
-    currentEpoch: 0, subscribe: () => () => {}, recordFor: () => null,
+    currentEpoch: 0, canReuseSnapshot: () => false, subscribe: () => () => {}, recordFor: () => null,
     collect: async () => ({ kind: 'pending' }), destroy: () => {},
   };
   const controller = new EditorController(view, { app: { keymap } as unknown as App, store, t: key => key, metadata, controllers: new Set(), notify });
@@ -326,6 +326,142 @@ describe('diagnosis, cancellation and focus return', () => {
     const { controller, toolbar, flush } = setup(); controller.show(false); flush(); controller.close('dismiss');
     expect(controller.show(false)).toBe(false);
     controller.update(select('select.pointer')); flush(); expect(toolbar.visible).toBe(true);
+    controller.destroy();
+  });
+});
+
+function noteEntry(path: string, aliases: readonly string[] = []): NoteMetadataEntry {
+  const name = path.split('/').pop()!.replace(/\.md$/, '');
+  const record = { path, name, aliases };
+  const file = { path, basename: name, extension: 'md' } as TFile;
+  return { record, file, signature: metadataSignature(record) };
+}
+
+function noteSearchSetup(initialEntries: readonly NoteMetadataEntry[]) {
+  const base = setup();
+  let entries = [...initialEntries];
+  let epoch = 0;
+  let ready = true;
+  const listeners = new Set<() => void>();
+  const collect = vi.fn(async (_signal: AbortSignal, isValid: () => boolean): Promise<MetadataResult> => {
+    if (!isValid()) return { kind: 'cancelled' };
+    if (!ready) return { kind: 'pending' };
+    return { kind: 'ready', epoch, entries: [...entries] };
+  });
+  const metadata: NoteMetadataSource = {
+    get currentEpoch() { return epoch; },
+    canReuseSnapshot: (targetEpoch: number) => ready && epoch === targetEpoch,
+    subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+    recordFor: file => entries.find(item => item.file === file)?.record ?? null,
+    collect,
+    destroy: () => { listeners.clear(); },
+  };
+  const toolbarNotePicker = vi.fn();
+  const app = {
+    keymap: base.keymap,
+    vault: { getFileByPath: (path: string) => entries.find(item => item.record.path === path)?.file ?? null },
+    metadataCache: {
+      fileToLinktext: (file: TFile) => file.basename,
+      getFirstLinkpathDest: (target: string) => entries.find(item => item.record.name === target)?.file ?? null,
+    },
+  } as unknown as App;
+  const controller = new EditorController(base.view, {
+    app, store: base.store, t: key => key, metadata, controllers: new Set(), notify: base.notify,
+  });
+  Object.assign(controller['toolbar'], { notePicker: toolbarNotePicker, refreshNotes: vi.fn(() => true) });
+  controller.show(true);
+  base.flush();
+  return {
+    ...base, controller, collect, toolbarNotePicker,
+    setEntries: (next: readonly NoteMetadataEntry[]) => { entries = [...next]; },
+    setReady: (value: boolean) => { ready = value; },
+    bumpEpoch: () => { epoch++; for (const listener of listeners) listener(); },
+  };
+}
+
+describe('picker snapshot reuse and quick-link freshness', () => {
+  it('reuses a ready snapshot within the same session and epoch, then collects again after invalidation or cancel', async () => {
+    const entries = [noteEntry('a/Alpha.md', ['TermA']), noteEntry('b/Beta.md', ['TermB'])];
+    const { controller, collect, bumpEpoch } = noteSearchSetup(entries);
+    const first = await controller['notes']('', new AbortController().signal);
+    expect(first).toMatchObject({ kind: 'ready', matchedCount: 2 });
+    expect(collect).toHaveBeenCalledTimes(1);
+
+    const second = await controller['notes']('TermB', new AbortController().signal);
+    expect(second).toMatchObject({ kind: 'ready', matchedCount: 1, items: [{ path: 'b/Beta.md' }] });
+    expect(collect).toHaveBeenCalledTimes(1);
+
+    bumpEpoch();
+    const afterInvalidation = await controller['notes']('TermA', new AbortController().signal);
+    expect(afterInvalidation).toMatchObject({ kind: 'ready', matchedCount: 1, items: [{ path: 'a/Alpha.md' }] });
+    expect(collect).toHaveBeenCalledTimes(2);
+
+    controller.cancelNoteRequests();
+    await controller['notes']('', new AbortController().signal);
+    expect(collect).toHaveBeenCalledTimes(3);
+    controller.destroy();
+  });
+
+  it('never caches non-ready responses and recovers on retry', async () => {
+    const entries = [noteEntry('a/Alpha.md')];
+    const { controller, collect, setReady } = noteSearchSetup(entries);
+    setReady(false);
+    await expect(controller['notes']('Alpha', new AbortController().signal)).resolves.toEqual({ kind: 'pending' });
+    setReady(true);
+    const recovered = await controller['notes']('Alpha', new AbortController().signal);
+    expect(recovered).toMatchObject({ kind: 'ready', matchedCount: 1 });
+    expect(collect).toHaveBeenCalledTimes(2);
+    controller.destroy();
+  });
+
+  it('prevents a stale concurrent collect from publishing over a newer epoch', async () => {
+    const entries = [noteEntry('a/Alpha.md')];
+    const { controller, collect, bumpEpoch } = noteSearchSetup(entries);
+    let release!: (value: MetadataResult) => void;
+    collect.mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { release = resolve; }));
+    const stalePromise = controller['notes']('Alpha', new AbortController().signal);
+    bumpEpoch();
+    release({ kind: 'ready', epoch: 0, entries });
+    await expect(stalePromise).resolves.toEqual({ kind: 'stale' });
+    await controller['notes']('Alpha', new AbortController().signal);
+    expect(collect).toHaveBeenCalledTimes(2);
+
+    // Concurrent older request resolving after a newer epoch-1 request already cached must not overwrite it
+    let releaseOlder!: (value: MetadataResult) => void;
+    collect.mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { releaseOlder = resolve; }));
+    bumpEpoch();
+    const older = controller['notes']('Alpha', new AbortController().signal);
+    bumpEpoch();
+    const newer = await controller['notes']('Alpha', new AbortController().signal);
+    expect(newer).toMatchObject({ kind: 'ready', matchedCount: 1 });
+    releaseOlder({ kind: 'ready', epoch: 2, entries });
+    await expect(older).resolves.toEqual({ kind: 'cancelled' });
+    // Subsequent query at current epoch (3) still hits the epoch-3 snapshot without another collect
+    await controller['notes']('Alpha', new AbortController().signal);
+    expect(collect).toHaveBeenCalledTimes(4);
+    controller.destroy();
+  });
+
+  it('always collects fresh metadata for quick-link even after warming the picker snapshot, and preserves conflicts beyond 50 matches', async () => {
+    const many = Array.from({ length: 55 }, (_, i) => noteEntry(`notes/${String(i).padStart(2, '0')}.md`, i >= 53 ? ['word'] : []));
+    const { controller, collect, setReady, toolbarNotePicker } = noteSearchSetup(many);
+    // Warm picker snapshot at current epoch
+    const warmed = await controller['notes']('word', new AbortController().signal);
+    expect(warmed).toMatchObject({ kind: 'ready', matchedCount: 2 });
+    expect(collect).toHaveBeenCalledTimes(1);
+
+    // Quick-link must still detect the conflict past 50 files via a fresh collect
+    await controller['runQuickLink']();
+    expect(collect).toHaveBeenCalledTimes(2);
+    expect(toolbarNotePicker).toHaveBeenCalledWith('word', 'conflict');
+
+    // Warm snapshot again, then make metadata pending and invoke quick-link: must NOT write or reuse snapshot
+    await controller['notes']('word', new AbortController().signal);
+    setReady(false);
+    toolbarNotePicker.mockClear();
+    await controller['runQuickLink']();
+    expect(collect).toHaveBeenCalledTimes(4);
+    expect(toolbarNotePicker).toHaveBeenCalledWith('word', undefined);
     controller.destroy();
   });
 });
