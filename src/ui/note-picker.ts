@@ -9,6 +9,7 @@ export interface NotePickerOptions {
 }
 
 export class NotePicker {
+  readonly labelId: string;
   private abort: AbortController | null = null;
   private generation = 0;
   private disposed = false;
@@ -20,8 +21,12 @@ export class NotePicker {
     input.className = 'hover-bar-search';
     if (options.initialQuery) input.value = options.initialQuery;
     const list = document.createElement('div'); list.className = 'hover-bar-notes';
-    list.setAttribute('role', 'listbox'); list.setAttribute('aria-label', t('searchNotes'));
+    list.setAttribute('role', 'listbox');
     list.id = `hover-bar-notes-${Math.random().toString(36).slice(2)}`;
+    // Obsidian displays aria-label on hover, including labels on ancestors of a result.
+    const label = document.createElement('span'); label.hidden = true; label.textContent = t('chooseNote');
+    this.labelId = label.id = `${list.id}-label`;
+    list.setAttribute('aria-labelledby', label.id);
     input.setAttribute('role', 'combobox'); input.setAttribute('aria-controls', list.id);
     input.setAttribute('aria-expanded', 'true'); input.setAttribute('aria-autocomplete', 'list');
     const truncated = document.createElement('div'); truncated.className = 'hover-bar-truncated';
@@ -72,7 +77,6 @@ export class NotePicker {
       for (const [index, note] of choices.entries()) {
         const row = document.createElement('div'); row.className = 'hover-bar-note'; row.id = `${list.id}-${index}`;
         row.setAttribute('role', 'option'); row.setAttribute('aria-disabled', String(!!note.disabledReason));
-        row.setAttribute('aria-label', [note.name, note.path, note.matchLabel, note.disabledReason].filter(Boolean).join(' · '));
         const name = document.createElement('strong'); name.textContent = note.name;
         const path = document.createElement('small'); path.textContent = note.path;
         row.append(name, path);
@@ -103,7 +107,7 @@ export class NotePicker {
       }
     });
     this.runSearch = search;
-    panel.append(input, list, truncated, notice, hint); void search(); input.focus({ preventScroll: true }); actions.resize();
+    panel.append(input, list, truncated, notice, hint, label); void search(); input.focus({ preventScroll: true }); actions.resize();
   }
 
   /** Re-run the current query, keeping the input value, caret and focus. */

@@ -79,7 +79,7 @@ describe('note picker request and input lifecycle', () => {
       expect(list.textContent).toBe(`${text}retry`);
     }
   });
-  it('shows the alias match label and reason as plain text and includes them in the accessible name', async () => {
+  it('shows result details as option text without a hover label', async () => {
     const { list, input, actions } = setup(async () => ready([
       { path: 'b.md', name: 'B', matchLabel: 'Alias: A' },
       { path: 'bad.md', name: 'Bad', disabledReason: 'tooLong' },
@@ -87,8 +87,12 @@ describe('note picker request and input lifecycle', () => {
     await settle();
     const first = list.children[0]!;
     expect(first.textContent).toBe('Bb.mdAlias: A');
-    expect(first.getAttribute('aria-label')).toBe('B · b.md · Alias: A');
-    keyboard(input, 'Enter'); expect(actions.selectNote).toHaveBeenCalledWith({ resultId: 'r1', path: 'b.md' });
+    expect(first.getAttribute('aria-label')).toBeNull();
+    first.dispatchEvent(new Event('click'));
+    keyboard(input, 'Enter');
+    expect(vi.mocked(actions.selectNote).mock.calls).toEqual([
+      [{ resultId: 'r1', path: 'b.md' }], [{ resultId: 'r1', path: 'b.md' }],
+    ]);
     keyboard(input, 'ArrowDown', false, 'keydown'); keyboard(input, 'Enter');
     expect(actions.explain).toHaveBeenCalledExactlyOnceWith('tooLong');
   });

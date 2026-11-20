@@ -39,10 +39,16 @@ export class ToolbarPanels {
     this.root.hidden = state.kind === 'none';
     if (state.kind === 'none') return;
     this.root.setAttribute('role', state.kind === 'notes' ? 'dialog' : 'group');
-    this.root.setAttribute('aria-label', this.t(state.kind === 'palette' ? state.palette : state.kind === 'notes' ? 'chooseNote' : 'more'));
+    if (state.kind === 'notes') {
+      this.root.removeAttribute('aria-label');
+      this.picker = new NotePicker(this.document, this.body, this.t, this.actions, { initialQuery: state.initialQuery, notice: state.notice });
+      this.root.setAttribute('aria-labelledby', this.picker.labelId);
+      return;
+    }
+    this.root.removeAttribute('aria-labelledby');
+    this.root.setAttribute('aria-label', this.t(state.kind === 'palette' ? state.palette : 'more'));
     if (state.kind === 'more') { this.renderMore(); this.body.scrollTop = state.scrollTop; }
     else if (state.kind === 'palette' && this.model) this.palette = new ColorPalette(this.document, this.body, this.back, state.palette, this.t, this.actions, this.callbacks.apply, this.model);
-    else if (state.kind === 'notes') this.picker = new NotePicker(this.document, this.body, this.t, this.actions, { initialQuery: state.initialQuery, notice: state.notice });
   }
 
   /** Re-run the open note search, if any, in place. Returns whether a search is visible. */
