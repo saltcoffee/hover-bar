@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_IDS, BASIC_FORMAT_IDS, DEFAULT_PINNED, fitLayout, layoutWidth, paletteColumns, resolveLayout, type ActionId, type LayoutMetrics } from '../src/toolbar/layout';
+import { ACTION_IDS, BASIC_FORMAT_IDS, DEFAULT_PINNED, copyLayout, fitLayout, layoutWidth, paletteColumns, resolveLayout, type ActionId, type LayoutMetrics, type ToolbarLayout } from '../src/toolbar/layout';
 
 const metrics: LayoutMetrics = { widths: Object.fromEntries([...ACTION_IDS, 'more'].map(id => [id, 32])) as Record<ActionId | 'more', number>, shell: 14, gap: 2, groupGap: 6 };
 
@@ -51,5 +51,18 @@ describe('toolbar width allocation', () => {
   it.each([[31, 0], [32, 1], [71, 1], [72, 2], [111, 2], [112, 3], [151, 3], [152, 4], [78, 2]])('uses %s pixels of content for %s palette columns', (width, columns) => {
     expect(paletteColumns(width)).toBe(columns);
     if (columns) expect((width - (columns - 1) * 8) / columns).toBeGreaterThanOrEqual(32);
+  });
+  it('validates, copies, and freezes custom layouts without aliasing the input array', () => {
+    const input: ActionId[] = ['bold', 'link'];
+    const copied = copyLayout({ kind: 'custom', pinned: input });
+    input.push('italic');
+    expect(copied).toEqual({ kind: 'custom', pinned: ['bold', 'link'] });
+    expect(Object.isFrozen(copied)).toBe(true);
+    if (copied.kind === 'custom') expect(Object.isFrozen(copied.pinned)).toBe(true);
+    expect(copyLayout({ kind: 'custom', pinned: [] })).toEqual({ kind: 'custom', pinned: [] });
+    expect(() => copyLayout({ kind: 'custom', pinned: ['bold', 'bold'] })).toThrow();
+    expect(() => copyLayout({ kind: 'custom', pinned: ['invalid'] as unknown as ActionId[] })).toThrow();
+    expect(() => copyLayout({ kind: 'custom', pinned: 'not-an-array' as unknown as ActionId[] })).toThrow();
+    expect(() => copyLayout({ kind: 'other' } as unknown as ToolbarLayout)).toThrow();
   });
 });

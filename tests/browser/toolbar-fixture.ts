@@ -122,7 +122,7 @@ async function mountController(options: FixtureOptions): Promise<void> {
   saveFailure = options.saveFailure ?? false;
   const host = {
     app, store, t, controllers: new Set<EditorController>(), notify: (reason: string) => events.push({ type: 'notice', action: reason }),
-    metadata: { currentEpoch: 0, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} },
+    metadata: { currentEpoch: 0, canReuseSnapshot: () => false, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} },
   };
   const facet = defineLanguageFacet();
   const language = new Language(facet, parser.configure({ props: [languageDataProp.add(type => type.isTop ? facet : undefined)] }));

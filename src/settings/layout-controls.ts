@@ -16,37 +16,36 @@ export class LayoutControls {
   private readonly emptyUnpinned: HTMLParagraphElement;
 
   constructor(private readonly root: HTMLElement, private readonly store: PreferencesStore, private readonly t: Translate) {
-    const doc = root.ownerDocument;
     root.classList.add('hover-bar-layout-settings');
-    this.heading = doc.createElement('h3'); this.heading.className = 'hover-bar-layout-heading'; this.heading.textContent = t('layout'); this.heading.tabIndex = -1;
-    this.mode = doc.createElement('p'); this.mode.className = 'setting-item-description hover-bar-layout-description';
-    const description = doc.createElement('p'); description.textContent = t('layoutDesc'); description.className = 'setting-item-description hover-bar-layout-description';
-    const cost = doc.createElement('p'); cost.textContent = t('layoutCost'); cost.className = 'setting-item-description hover-bar-layout-description';
-    const pinnedTitle = doc.createElement('h4'); pinnedTitle.className = 'hover-bar-layout-subheading'; pinnedTitle.textContent = t('pinned');
-    this.pinned = doc.createElement('ol'); this.pinned.className = 'hover-bar-layout-list'; this.pinned.setAttribute('aria-label', t('pinned'));
-    const unpinnedTitle = doc.createElement('h4'); unpinnedTitle.className = 'hover-bar-layout-subheading'; unpinnedTitle.textContent = t('unpinned');
-    this.unpinned = doc.createElement('ul'); this.unpinned.className = 'hover-bar-layout-list'; this.unpinned.setAttribute('aria-label', t('unpinned'));
-    this.emptyPinned = doc.createElement('p'); this.emptyPinned.textContent = t('noPinned');
-    this.emptyUnpinned = doc.createElement('p'); this.emptyUnpinned.textContent = t('allPinned');
-    this.reset = this.button(t('resetLayout')); this.reset.addEventListener('click', () => { void store.resetLayout(); this.announce(t('layoutRestored')); });
-    this.announcement = doc.createElement('p'); this.announcement.className = 'hover-bar-settings-feedback'; this.announcement.setAttribute('role', 'status'); this.announcement.setAttribute('aria-live', 'polite');
-    const footer = doc.createElement('div'); footer.className = 'hover-bar-layout-footer'; footer.append(this.announcement, this.reset);
-    root.append(this.heading, this.mode, description, cost, pinnedTitle, this.pinned, this.emptyPinned, unpinnedTitle, this.unpinned, this.emptyUnpinned, footer);
+    this.heading = root.createEl('h3', { cls: 'hover-bar-layout-heading', text: t('layout') }); this.heading.tabIndex = -1;
+    this.mode = root.createEl('p', { cls: 'setting-item-description hover-bar-layout-description' });
+    root.createEl('p', { cls: 'setting-item-description hover-bar-layout-description', text: t('layoutDesc') });
+    root.createEl('p', { cls: 'setting-item-description hover-bar-layout-description', text: t('layoutCost') });
+    root.createEl('h4', { cls: 'hover-bar-layout-subheading', text: t('pinned') });
+    this.pinned = root.createEl('ol', { cls: 'hover-bar-layout-list', attr: { 'aria-label': t('pinned') } });
+    this.emptyPinned = root.createEl('p', { text: t('noPinned') });
+    root.createEl('h4', { cls: 'hover-bar-layout-subheading', text: t('unpinned') });
+    this.unpinned = root.createEl('ul', { cls: 'hover-bar-layout-list', attr: { 'aria-label': t('unpinned') } });
+    this.emptyUnpinned = root.createEl('p', { text: t('allPinned') });
+    const footer = root.createDiv({ cls: 'hover-bar-layout-footer' });
+    this.announcement = footer.createEl('p', { cls: 'hover-bar-settings-feedback', attr: { role: 'status', 'aria-live': 'polite' } });
+    this.reset = this.button(footer, t('resetLayout'));
+    this.reset.addEventListener('click', () => { void store.resetLayout(); this.announce(t('layoutRestored')); });
     for (const id of ACTION_IDS) {
-      const element = doc.createElement('li'); element.className = 'hover-bar-layout-row'; element.dataset.action = id;
-      const label = doc.createElement('span'); label.className = 'hover-bar-layout-label';
-      const toggle = this.button(''), up = this.button(t('moveUp')), down = this.button(t('moveDown'));
+      const element = this.unpinned.createEl('li', { cls: 'hover-bar-layout-row' }); element.dataset.action = id;
+      const label = element.createSpan({ cls: 'hover-bar-layout-label' });
+      const controls = element.createDiv({ cls: 'hover-bar-layout-controls' });
+      const toggle = this.button(controls, ''), up = this.button(controls, t('moveUp')), down = this.button(controls, t('moveDown'));
       toggle.dataset.control = 'toggle'; up.dataset.control = 'up'; down.dataset.control = 'down';
       toggle.addEventListener('click', () => this.change(id, 'toggle'));
       up.addEventListener('click', () => this.change(id, 'up')); down.addEventListener('click', () => this.change(id, 'down'));
-      const controls = doc.createElement('div'); controls.className = 'hover-bar-layout-controls'; controls.append(toggle, up, down);
-      element.append(label, controls); this.rows.set(id, { element, label, toggle, up, down });
+      this.rows.set(id, { element, label, toggle, up, down });
     }
     this.update();
   }
 
-  private button(label: string): HTMLButtonElement {
-    const button = this.root.ownerDocument.createElement('button'); button.type = 'button'; button.textContent = label; return button;
+  private button(parent: HTMLElement, label: string): HTMLButtonElement {
+    return parent.createEl('button', { type: 'button', text: label });
   }
   private announce(message: string): void { this.announcement.textContent = message; }
   focus(): void { this.heading.focus({ preventScroll: true }); }

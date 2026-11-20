@@ -1,17 +1,32 @@
 // Minimal native DOM boundary for settings unit tests. Real focus, layout and keyboard
 // behavior are verified separately in Obsidian, not inferred from this adapter.
+interface ElementOptions {
+  cls?: string | string[];
+  text?: string;
+  attr?: Record<string, string | number | boolean | null>;
+  type?: string;
+  placeholder?: string;
+  value?: string;
+  prepend?: boolean;
+}
+
 export class TestElement extends EventTarget {
   children: TestElement[] = [];
   parentElement: TestElement | null = null;
   className = ''; dataset: Record<string, string> = {}; attributes = new Map<string, string>();
-  hidden = false; disabled = false; checked = false; type = ''; tabIndex = 0; value = '';
+  hidden = false; disabled = false; checked = false; type = ''; tabIndex = 0; value = ''; placeholder = ''; id = ''; htmlFor = '';
   scrollTop = 0;
   readonly style = { setProperty() {}, removeProperty() {} };
   private text = '';
   constructor(readonly tagName: string, readonly ownerDocument: TestDocument) { super(); }
   get textContent(): string { return this.text + this.children.map(child => child.textContent).join(''); }
   set textContent(value: string) { this.replaceChildren(); this.text = value; }
-  get classList() { return { add: (...names: string[]) => { this.className = [...new Set([...this.className.split(' '), ...names])].filter(Boolean).join(' '); } }; }
+  get classList() {
+    return {
+      add: (...names: string[]) => { this.className = [...new Set([...this.className.split(' '), ...names])].filter(Boolean).join(' '); },
+      remove: (...names: string[]) => { this.className = this.className.split(' ').filter(name => name && !names.includes(name)).join(' '); },
+    };
+  }
   get isConnected(): boolean { return this === this.ownerDocument.body || !!this.parentElement?.isConnected; }
   setAttribute(key: string, value: string): void { this.attributes.set(key, value); }
   removeAttribute(key: string): void { this.attributes.delete(key); }
@@ -19,6 +34,30 @@ export class TestElement extends EventTarget {
   contains(node: TestElement | null): boolean { return node === this || this.children.some(child => child.contains(node)); }
   focus(): void { if (this.isConnected && !this.disabled && !this.hidden) this.ownerDocument.activeElement = this; }
   getBoundingClientRect() { return { top: 0, bottom: 36, left: 0, right: 36, width: 36, height: 36 }; }
+  empty(): void { this.replaceChildren(); }
+  createEl(tag: string, options?: ElementOptions | string, callback?: (el: TestElement) => void): TestElement {
+    const element = this.ownerDocument.createElement(tag);
+    if (typeof options === 'string') element.className = options;
+    else if (options) {
+      if (options.cls) element.className = Array.isArray(options.cls) ? options.cls.join(' ') : options.cls;
+      if (options.text !== undefined) element.textContent = options.text;
+      if (options.type !== undefined) element.type = options.type;
+      if (options.placeholder !== undefined) element.placeholder = options.placeholder;
+      if (options.value !== undefined) element.value = options.value;
+      if (options.attr) {
+        for (const [key, value] of Object.entries(options.attr)) {
+          if (value !== null) element.setAttribute(key, String(value));
+        }
+      }
+    }
+    if (typeof options === 'object' && options?.prepend) {
+      this.detach(element); this.children.unshift(element); element.parentElement = this;
+    } else this.append(element);
+    callback?.(element);
+    return element;
+  }
+  createDiv(options?: ElementOptions | string, callback?: (el: TestElement) => void): TestElement { return this.createEl('div', options, callback); }
+  createSpan(options?: ElementOptions | string, callback?: (el: TestElement) => void): TestElement { return this.createEl('span', options, callback); }
   private detach(child: TestElement): void {
     if (!child.parentElement) return;
     if (child.contains(this.ownerDocument.activeElement)) this.ownerDocument.activeElement = this.ownerDocument.body;

@@ -15,6 +15,12 @@ export class Scope {
   readonly handlers = new Map<string, (event: KeyboardEvent) => unknown>();
   register(_modifiers: unknown, key: string, callback: (event: KeyboardEvent) => unknown): void { this.handlers.set(key, callback); }
 }
+export class PluginSettingTab {
+  containerEl!: HTMLElement;
+  constructor(readonly app: unknown, readonly plugin: unknown) {}
+  display(): void {}
+  hide(): void {}
+}
 // Minimal frontmatter alias reader matching the public host helper semantics used by the adapter.
 export function parseFrontMatterAliases(frontmatter: unknown): string[] | null {
   if (!frontmatter || typeof frontmatter !== 'object') return null;

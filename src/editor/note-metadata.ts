@@ -17,6 +17,7 @@ export type MetadataResult =
 
 export interface NoteMetadataSource {
   readonly currentEpoch: number;
+  canReuseSnapshot(epoch: number): boolean;
   subscribe(listener: () => void): () => void;
   collect(signal: AbortSignal, isValid: () => boolean, scheduleYield: () => Promise<void>): Promise<MetadataResult>;
   recordFor(file: TFile): NoteRecord | null;
@@ -63,6 +64,10 @@ export class NoteMetadata implements NoteMetadataSource {
 
   get currentEpoch(): number {
     return this.epoch;
+  }
+
+  canReuseSnapshot(epoch: number): boolean {
+    return !this.destroyed && this.app.workspace.layoutReady && this.pending.size === 0 && this.epoch === epoch;
   }
 
   subscribe(listener: () => void): () => void {

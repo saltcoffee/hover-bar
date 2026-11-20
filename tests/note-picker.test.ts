@@ -4,7 +4,7 @@ import type { NoteChoice, NoteSearchResult, ToolbarActions } from '../src/ui/too
 
 // Only the DOM boundary is replaced. Requests, cancellation and composition use the real picker.
 class Element extends EventTarget {
-  tagName: string; className = ''; id = ''; type = ''; placeholder = ''; value = '';
+  tagName: string; className = ''; id = ''; type = ''; placeholder = ''; value = ''; hidden = false;
   children: Element[] = []; attributes = new Map<string, string>(); private text = '';
   scrollIntoView = vi.fn(); focus = vi.fn();
   constructor(tag: string) { super(); this.tagName = tag.toUpperCase(); }
@@ -15,6 +15,21 @@ class Element extends EventTarget {
   removeAttribute(key: string) { this.attributes.delete(key); }
   append(...children: Element[]) { this.children.push(...children); }
   replaceChildren(...children: Element[]) { this.text = ''; this.children = children; }
+  createEl(tag: string, options?: { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean | null>; type?: string; placeholder?: string } | string) {
+    const child = new Element(tag);
+    if (typeof options === 'string') child.className = options;
+    else if (options) {
+      if (options.cls) child.className = Array.isArray(options.cls) ? options.cls.join(' ') : options.cls;
+      if (options.text !== undefined) child.textContent = options.text;
+      if (options.type !== undefined) child.type = options.type;
+      if (options.placeholder !== undefined) child.placeholder = options.placeholder;
+      if (options.attr) for (const [key, value] of Object.entries(options.attr)) if (value !== null) child.setAttribute(key, String(value));
+    }
+    this.append(child);
+    return child;
+  }
+  createDiv(options?: Parameters<Element['createEl']>[1]) { return this.createEl('div', options); }
+  createSpan(options?: Parameters<Element['createEl']>[1]) { return this.createEl('span', options); }
 }
 
 function ready(items: readonly NoteChoice[], resultId = 'r1', hasMore = false): NoteSearchResult {
@@ -34,8 +49,7 @@ function setup(notes: ToolbarActions['notes'] = async () => ready([{ path: 'targ
   const actions: ToolbarActions = {
     notes, format: vi.fn(), explain: vi.fn(), quickLink: vi.fn(), selectNote: vi.fn(), cancelNoteRequests: vi.fn(), close: vi.fn(), resize: vi.fn(),
   };
-  const picker = new NotePicker({ createElement: (tag: string) => new Element(tag) } as unknown as Document,
-    panel as unknown as HTMLElement, key => key, actions, options);
+  const picker = new NotePicker(panel as unknown as HTMLElement, key => key, actions, options);
   return { picker, actions, panel, input: panel.children[0]!, list: panel.children[1]! };
 }
 
@@ -68,9 +82,10 @@ describe('note picker request and input lifecycle', () => {
   });
   it('keeps the failed search retryable and replaces the error with new results', async () => {
     const notes = vi.fn().mockRejectedValueOnce(Error('Read failure')).mockResolvedValueOnce(ready([{ path: 'target.md', name: 'Target' }]));
-    const { list } = setup(notes); await settle();
+    const { list, actions } = setup(notes); await settle();
     expect(list.getAttribute('aria-busy')).toBe('false'); expect(list.textContent).toBe('metadataErrorretry');
     list.children[0]!.dispatchEvent(new Event('click')); await settle();
+    expect(actions.cancelNoteRequests).toHaveBeenCalledTimes(1);
     expect(list.textContent).toBe('Targettarget.md'); expect(notes).toHaveBeenCalledTimes(2);
   });
   it('maps pending, stale and transport errors to their own retryable states', async () => {

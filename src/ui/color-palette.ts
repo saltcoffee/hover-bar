@@ -27,25 +27,25 @@ export class ColorPalette {
     private readonly kind: PaletteKind, private readonly t: Translate, private readonly actions: ToolbarActions,
     private readonly submit: (kind: PaletteKind, color?: string) => void, model: ToolbarViewModel) {
     const grid = (label: string): Grid => {
-      const heading = document.createElement('h4'); heading.className = 'hover-bar-palette-heading'; heading.textContent = label;
-      const root = document.createElement('div'); root.className = 'hover-bar-palette'; root.setAttribute('role', 'group'); root.setAttribute('aria-label', label);
-      body.append(heading, root); return { root, buttons: new Map(), order: [] };
+      body.createEl('h4', { cls: 'hover-bar-palette-heading', text: label });
+      const root = body.createDiv({ cls: 'hover-bar-palette', attr: { role: 'group', 'aria-label': label } });
+      return { root, buttons: new Map(), order: [] };
     };
-    this.grids = { recent: grid(t('recentColors')), presets: grid(t('presetColors')) };
-    this.empty = document.createElement('p'); this.empty.className = 'hover-bar-hint'; this.empty.textContent = t('noRecentColors');
-    this.grids.recent.root.after(this.empty);
-    const custom = document.createElement('div'); custom.className = 'hover-bar-custom-color';
-    const heading = document.createElement('h4'); heading.className = 'hover-bar-palette-heading'; heading.textContent = t('customColor');
-    const label = document.createElement('label'); label.textContent = t('hexColor');
-    this.input = document.createElement('input'); this.input.type = 'text'; this.input.className = 'hover-bar-hex';
+    const recent = grid(t('recentColors'));
+    this.empty = body.createEl('p', { cls: 'hover-bar-hint', text: t('noRecentColors') });
+    const presets = grid(t('presetColors'));
+    this.grids = { recent, presets };
+    const custom = body.createDiv({ cls: 'hover-bar-custom-color' });
+    custom.createEl('h4', { cls: 'hover-bar-palette-heading', text: t('customColor') });
+    const label = custom.createEl('label', { text: t('hexColor') });
+    this.input = custom.createEl('input', { type: 'text', cls: 'hover-bar-hex' });
     this.input.id = `hover-bar-hex-${Math.random().toString(36).slice(2)}`; label.htmlFor = this.input.id;
     this.input.spellcheck = false; this.input.autocomplete = 'off'; this.input.value = model.colors[kind] ?? '';
-    const hint = document.createElement('p'); hint.className = 'hover-bar-hint'; hint.textContent = t('hexHint'); hint.id = `${this.input.id}-hint`;
-    this.error = document.createElement('p'); this.error.className = 'hover-bar-color-error'; this.error.id = `${this.input.id}-error`;
-    this.error.setAttribute('role', 'status'); this.error.setAttribute('aria-live', 'polite');
+    const hint = custom.createEl('p', { cls: 'hover-bar-hint', text: t('hexHint') }); hint.id = `${this.input.id}-hint`;
+    this.preview = custom.createDiv({ cls: 'hover-bar-color-sample' });
+    this.apply = custom.createEl('button', { type: 'button', cls: 'hover-bar-button hover-bar-menu-item hover-bar-apply-color', text: t('applyColor') });
+    this.error = custom.createEl('p', { cls: 'hover-bar-color-error', attr: { role: 'status', 'aria-live': 'polite' } }); this.error.id = `${this.input.id}-error`;
     this.input.setAttribute('aria-describedby', `${hint.id} ${this.error.id}`);
-    this.preview = document.createElement('div'); this.preview.className = 'hover-bar-color-sample';
-    this.apply = document.createElement('button'); this.apply.type = 'button'; this.apply.className = 'hover-bar-button hover-bar-menu-item hover-bar-apply-color'; this.apply.textContent = t('applyColor');
     this.apply.addEventListener('click', () => this.applyColor());
     this.input.addEventListener('input', () => this.updateDraft());
     this.input.addEventListener('compositionstart', () => { this.composing = true; });
@@ -64,14 +64,16 @@ export class ColorPalette {
       }
       if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); this.applyColor(); }
     });
-    custom.append(heading, label, this.input, hint, this.preview, this.apply, this.error);
-    this.reset = document.createElement('button'); this.reset.type = 'button'; this.reset.className = 'hover-bar-button hover-bar-menu-item hover-bar-reset-color';
-    this.reset.textContent = t(kind === 'foreground' ? 'resetForeground' : 'resetBackground');
+    this.reset = body.createEl('button', {
+      type: 'button',
+      cls: 'hover-bar-button hover-bar-menu-item hover-bar-reset-color',
+      text: t(kind === 'foreground' ? 'resetForeground' : 'resetBackground'),
+    });
     this.reset.addEventListener('click', () => {
       const state = this.model?.resets[kind];
       if (state?.enabled) this.submit(kind); else if (state?.reason) this.actions.explain(state.reason);
     });
-    body.append(custom, this.reset); this.update(model);
+    this.update(model);
   }
 
   update(model: ToolbarViewModel): void {
@@ -92,15 +94,15 @@ export class ColorPalette {
       if (!isCanonicalHex(color.color)) continue;
       let button = grid.buttons.get(color.color);
       if (!button) {
-        button = this.document.createElement('button'); button.type = 'button'; button.tabIndex = -1;
-        button.className = 'hover-bar-swatch'; button.dataset.swatch = color.id;
+        button = grid.root.createEl('button', { type: 'button', cls: 'hover-bar-swatch' }); button.tabIndex = -1;
+        button.dataset.swatch = color.id;
         button.style.setProperty('--hover-bar-swatch', color.color);
         button.addEventListener('click', () => {
           const current = grid.order.find(item => item.color === color.color);
           if (!this.model) return;
           if (current?.enabled) this.submit(this.kind, current.color); else if (current?.reason) this.actions.explain(current.reason);
         });
-        grid.buttons.set(color.color, button); grid.root.append(button);
+        grid.buttons.set(color.color, button);
       }
       setActionState(button, color, color.label); button.replaceChildren();
       if (color.pressed) setIcon(button, 'check');

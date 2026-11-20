@@ -16,7 +16,7 @@ async function setup(source = span, options: Parameters<typeof selectionFixture>
   let ranges = [{ from: 0, to: source.length }];
   Object.defineProperty(fixture.view, 'visibleRanges', { get: () => ranges });
   const host: Host = { app: fixture.app, store: fixture.store, t: key => key, controllers: new Set(), notify: vi.fn(),
-    metadata: { currentEpoch: 0, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} } };
+    metadata: { currentEpoch: 0, canReuseSnapshot: () => false, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} } };
   // Capture the registered class without creating a DOM view. Decorations and syntax are real.
   const register = vi.spyOn(ViewPlugin, 'fromClass'); colorPreview(host);
   const Constructor = register.mock.lastCall![0] as new (view: EditorView) => Preview; register.mockRestore();

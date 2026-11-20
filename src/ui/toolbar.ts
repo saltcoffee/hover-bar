@@ -22,21 +22,20 @@ export class Toolbar {
   private lastActionOrigin: PanelOrigin | null = null;
 
   constructor(private readonly document: Document, private readonly t: Translate, private readonly actions: ToolbarActions) {
-    this.root = document.createElement('div'); this.root.className = 'hover-bar-layer'; this.root.hidden = true;
-    this.bar = document.createElement('div'); this.bar.className = 'hover-bar';
-    this.bar.setAttribute('role', 'toolbar'); this.bar.setAttribute('aria-label', t('toolbar'));
-    this.panels = new ToolbarPanels(document, t, actions, {
+    this.root = document.body.createDiv({ cls: 'hover-bar-layer' }); this.root.hidden = true;
+    this.bar = this.root.createDiv({ cls: 'hover-bar', attr: { role: 'toolbar', 'aria-label': t('toolbar') } });
+    this.panels = new ToolbarPanels(this.root, t, actions, {
       activate: id => this.activate(id, 'more'), apply: (kind, color) => this.format(kind, color), back: () => this.back(),
     });
-    this.measurements = document.createElement('div'); this.measurements.className = 'hover-bar-measurements';
-    this.measurements.setAttribute('aria-hidden', 'true'); this.measurements.inert = true;
-    this.root.append(this.bar, this.panels.root, this.measurements);
+    this.measurements = this.root.createDiv({ cls: 'hover-bar-measurements', attr: { 'aria-hidden': 'true' } });
+    this.measurements.inert = true;
+    const staging = document.createDocumentFragment();
     for (const id of [...ACTION_IDS, 'more'] as const) {
-      const button = actionButton(document, id, t); button.addEventListener('click', () => this.activate(id, 'bar'));
+      const button = actionButton(staging, id, t); button.addEventListener('click', () => this.activate(id, 'bar'));
       this.controls.set(id, button);
-      const sample = button.cloneNode(true) as HTMLButtonElement;
+      const sample = actionButton(this.measurements, id, t);
       sample.removeAttribute('data-action'); sample.tabIndex = -1;
-      this.samples.set(id, sample); this.measurements.append(sample);
+      this.samples.set(id, sample);
     }
     this.bar.append(this.controls.get('more')!);
     this.root.addEventListener('pointerdown', event => {
@@ -48,7 +47,6 @@ export class Toolbar {
     this.root.addEventListener('contextmenu', event => {
       if (!event.composedPath().some(node => (node as Element).tagName === 'INPUT')) event.preventDefault();
     });
-    document.body.append(this.root);
   }
 
   update(model: ToolbarViewModel): void {

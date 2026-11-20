@@ -7,7 +7,7 @@ import { PreferencesStore } from '../settings/store';
 import { Toolbar, type ToolbarMeasurement } from '../ui/toolbar';
 import type { ActionOutcome, NoteChoice, NoteSearchResult, NoteSelection } from '../ui/toolbar-types';
 import { place, viewportBounds } from '../ui/position';
-import { exactTargetPaths, normalizeQuery, searchRecords, sortRecordsByPath, type NoteMatch } from '../links/note-search';
+import { exactTargetPaths, normalizeQuery, searchRecords, sortRecordsByPath, type NoteMatch, type NoteRecord } from '../links/note-search';
 import { applyEdit, ownEdit } from './apply-edit';
 import { capture, matchesSnapshot, sameSelectionSession, type SelectionSnapshot } from './context';
 import { actionFeedback, selectionFeedback } from './feedback';
@@ -25,6 +25,15 @@ interface NoteEvidence {
   readonly sessionKey: string;
   readonly epoch: number;
   readonly entries: ReadonlyMap<string, { readonly file: TFile; readonly signature: string }>;
+}
+
+/** Ready snapshot reused only for picker candidate display within one session and metadata epoch. */
+interface PickerSnapshot {
+  readonly sessionKey: string;
+  readonly epoch: number;
+  readonly byPath: ReadonlyMap<string, NoteMetadataEntry>;
+  readonly records: readonly NoteRecord[];
+  sortedByPath: readonly NoteMetadataEntry[] | null;
 }
 
 // When one endpoint of a long selection is off-screen, keep the visual span only while it stays
@@ -57,6 +66,7 @@ export class EditorController {
   private noteRequest = 0;
   private notesAbort: AbortController | null = null;
   private noteEvidence: NoteEvidence | null = null;
+  private pickerSnapshot: PickerSnapshot | null = null;
   private quickPending: { readonly query: string; readonly request: number } | null = null;
   private readonly unsubscribeMetadata: () => void;
 
@@ -342,40 +352,51 @@ export class EditorController {
 
   private async notes(query: string, signal: AbortSignal): Promise<NoteSearchResult> {
     const session = this.current;
-    if (!session || this.destroyed) return { kind: 'cancelled' };
+    if (!session || this.destroyed || signal.aborted) return { kind: 'cancelled' };
     const request = ++this.noteRequest;
     // A picker search supersedes any quick-link request that has not yet opened the picker.
     this.quickPending = null;
+    const key = selectionKey(session);
     const isValid = () => !this.destroyed && this.current === session && this.noteRequest === request && !signal.aborted;
-    const meta = await this.host.metadata.collect(signal, isValid, () => new Promise<void>(resolve => this.window.setTimeout(resolve, 0)));
-    if (!isValid()) return { kind: 'cancelled' };
-    if (meta.kind !== 'ready') {
-      if (meta.kind === 'pending') return { kind: 'pending' };
-      if (meta.kind === 'stale') return { kind: 'stale' };
-      if (meta.kind === 'error') return { kind: 'error' };
-      return { kind: 'cancelled' };
+    let snapshot = this.pickerSnapshot && this.pickerSnapshot.sessionKey === key &&
+      this.host.metadata.canReuseSnapshot(this.pickerSnapshot.epoch)
+      ? this.pickerSnapshot : null;
+    if (!snapshot) {
+      this.pickerSnapshot = null;
+      const meta = await this.host.metadata.collect(signal, isValid, () => new Promise<void>(resolve => this.window.setTimeout(resolve, 0)));
+      if (!isValid()) return { kind: 'cancelled' };
+      if (meta.kind !== 'ready') {
+        if (meta.kind === 'pending') return { kind: 'pending' };
+        if (meta.kind === 'stale') return { kind: 'stale' };
+        if (meta.kind === 'error') return { kind: 'error' };
+        return { kind: 'cancelled' };
+      }
+      if (!this.host.metadata.canReuseSnapshot(meta.epoch)) return { kind: 'stale' };
+      const byPath = new Map(meta.entries.map(entry => [entry.record.path, entry] as const));
+      const records = meta.entries.map(entry => entry.record);
+      snapshot = { sessionKey: key, epoch: meta.epoch, byPath, records, sortedByPath: null };
+      this.pickerSnapshot = snapshot;
     }
     const queryKey = normalizeQuery(query);
-    const byPath = new Map(meta.entries.map(entry => [entry.record.path, entry] as const));
-    let pageEntries: NoteMetadataEntry[];
+    let pageEntries: readonly NoteMetadataEntry[];
     let items: NoteChoice[];
     let matchedCount: number;
     if (!queryKey) {
-      const ordered = sortRecordsByPath(meta.entries.map(entry => entry.record));
-      matchedCount = ordered.length;
-      pageEntries = ordered.slice(0, 50).map(record => byPath.get(record.path)!);
+      snapshot.sortedByPath ??= sortRecordsByPath(snapshot.records).map(record => snapshot.byPath.get(record.path)!);
+      matchedCount = snapshot.sortedByPath.length;
+      pageEntries = snapshot.sortedByPath.slice(0, 50);
       items = pageEntries.map(entry => this.choice(session, entry, null));
     } else {
-      const matches = searchRecords(meta.entries.map(entry => entry.record), queryKey);
+      const matches = searchRecords(snapshot.records, queryKey);
       matchedCount = matches.length;
       const page = matches.slice(0, 50);
-      pageEntries = page.map(match => byPath.get(match.path)!);
-      items = page.map(match => this.choice(session, byPath.get(match.path)!, match));
+      pageEntries = page.map(match => snapshot.byPath.get(match.path)!);
+      items = page.map(match => this.choice(session, snapshot.byPath.get(match.path)!, match));
     }
     if (!isValid()) return { kind: 'cancelled' };
-    const resultId = `${request}:${meta.epoch}`;
+    const resultId = `${request}:${snapshot.epoch}`;
     const entries = new Map(pageEntries.map(entry => [entry.record.path, { file: entry.file, signature: entry.signature }] as const));
-    this.noteEvidence = { resultId, request, sessionKey: selectionKey(session), epoch: meta.epoch, entries };
+    this.noteEvidence = { resultId, request, sessionKey: key, epoch: snapshot.epoch, entries };
     return { kind: 'ready', resultId, items, matchedCount, hasMore: matchedCount > 50 };
   }
 
@@ -404,6 +425,7 @@ export class EditorController {
     this.noteRequest++;
     if (this.notesAbort) { this.notesAbort.abort(); this.notesAbort = null; }
     this.noteEvidence = null;
+    this.pickerSnapshot = null;
     this.quickPending = null;
   }
 
@@ -416,6 +438,7 @@ export class EditorController {
   private onMetadataChanged(): void {
     if (this.destroyed) return;
     this.noteEvidence = null;
+    this.pickerSnapshot = null;
     this.notesAbort?.abort(); this.notesAbort = null;
     const quick = this.quickPending;
     if (quick) {

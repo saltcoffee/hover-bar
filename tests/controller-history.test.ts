@@ -40,7 +40,7 @@ async function setup(source = 'before text after') {
   const notify = vi.fn();
   const controller = new EditorController(fixture.view, { app: fixture.app, store: fixture.store,
     t: key => key, controllers: new Set(), notify,
-    metadata: { currentEpoch: 0, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} } }); controllers.push(controller);
+    metadata: { currentEpoch: 0, canReuseSnapshot: () => false, subscribe: () => () => {}, recordFor: () => null, collect: async () => ({ kind: 'pending' as const }), destroy: () => {} } }); controllers.push(controller);
   expect(controller.show(true)).toBe(true);
   const originalRecord = fixture.store.recordColorUse.bind(fixture.store), record = vi.spyOn(fixture.store, 'recordColorUse');
   return { ...fixture, controller, toolbar: controller['toolbar'], dispatch, record, originalRecord, notify };
