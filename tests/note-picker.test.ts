@@ -1,22 +1,44 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotePicker, type NotePickerOptions } from '../src/ui/note-picker';
 import type { NoteChoice, NoteSearchResult, ToolbarActions } from '../src/ui/toolbar-types';
 
+afterEach(() => { vi.useRealTimers(); });
+
 // Only the DOM boundary is replaced. Requests, cancellation and composition use the real picker.
+class Doc {
+  activeElement: Element | null = null;
+  readonly defaultView = {
+    setTimeout: (callback: () => void, delay: number) => globalThis.setTimeout(callback, delay),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(id),
+  };
+}
+
 class Element extends EventTarget {
   tagName: string; className = ''; id = ''; type = ''; placeholder = ''; value = ''; hidden = false;
   children: Element[] = []; attributes = new Map<string, string>(); private text = '';
-  scrollIntoView = vi.fn(); focus = vi.fn();
-  constructor(tag: string) { super(); this.tagName = tag.toUpperCase(); }
-  set textContent(value: string) { this.text = value; this.children = []; }
+  scrollIntoView = vi.fn();
+  focus = vi.fn(() => { this.ownerDocument.activeElement = this; });
+  constructor(tag: string, readonly ownerDocument: Doc = new Doc()) { super(); this.tagName = tag.toUpperCase(); }
+  set textContent(value: string) {
+    if (this.contains(this.ownerDocument.activeElement) && this.ownerDocument.activeElement !== this) {
+      this.ownerDocument.activeElement = null;
+    }
+    this.text = value; this.children = [];
+  }
   get textContent(): string { return this.text + this.children.map(child => child.textContent).join(''); }
+  contains(node: Element | null): boolean { return node === this || this.children.some(child => child.contains(node)); }
   setAttribute(key: string, value: string) { this.attributes.set(key, value); }
   getAttribute(key: string) { return this.attributes.get(key) ?? null; }
   removeAttribute(key: string) { this.attributes.delete(key); }
   append(...children: Element[]) { this.children.push(...children); }
-  replaceChildren(...children: Element[]) { this.text = ''; this.children = children; }
+  replaceChildren(...children: Element[]) {
+    if (this.contains(this.ownerDocument.activeElement) && this.ownerDocument.activeElement !== this) {
+      this.ownerDocument.activeElement = null;
+    }
+    this.text = ''; this.children = children;
+  }
   createEl(tag: string, options?: { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean | null>; type?: string; placeholder?: string } | string) {
-    const child = new Element(tag);
+    const child = new Element(tag, this.ownerDocument);
     if (typeof options === 'string') child.className = options;
     else if (options) {
       if (options.cls) child.className = Array.isArray(options.cls) ? options.cls.join(' ') : options.cls;
@@ -41,8 +63,8 @@ function deferred() {
   return { promise, resolve, reject };
 }
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); };
-function keyboard(input: Element, key: string, isComposing = false, type = 'keydown', keyCode = 0) {
-  const event = Object.assign(new Event(type, { cancelable: true }), { key, isComposing, keyCode }); input.dispatchEvent(event); return event;
+function keyboard(input: Element, key: string, isComposing = false, type = 'keydown', code = key, repeat = false) {
+  const event = Object.assign(new Event(type, { cancelable: true }), { key, isComposing, code, repeat }); input.dispatchEvent(event); return event;
 }
 function setup(notes: ToolbarActions['notes'] = async () => ready([{ path: 'target.md', name: 'Target' }]), options: NotePickerOptions = {}) {
   const panel = new Element('div');
@@ -126,33 +148,104 @@ describe('note picker request and input lifecycle', () => {
     expect(panel.textContent).not.toContain('conflictNotice');
   });
   it('does not consume composition keys or confirm until the composing Enter has been released', async () => {
+    vi.useFakeTimers();
     const { input, actions } = setup(); await settle();
     input.dispatchEvent(new Event('compositionstart'));
     expect(keyboard(input, 'Enter', true).defaultPrevented).toBe(false);
-    input.dispatchEvent(new Event('compositionend')); keyboard(input, 'Enter');
+    input.dispatchEvent(new Event('compositionend'));
+    vi.runAllTimers();
+    keyboard(input, 'Enter');
     expect(actions.selectNote).not.toHaveBeenCalled();
     keyboard(input, 'Enter', false, 'keyup'); keyboard(input, 'Enter');
     expect(actions.selectNote).toHaveBeenCalledExactlyOnceWith({ resultId: 'r1', path: 'target.md' });
   });
-  it('lets a new confirmation work after composition was completed without Enter', async () => {
+  it('lets a new confirmation work after non-keyboard composition completion once the guard tick expires', async () => {
+    vi.useFakeTimers();
     const { input, actions } = setup(); await settle();
-    input.dispatchEvent(new Event('compositionstart')); input.dispatchEvent(new Event('compositionend')); keyboard(input, 'Enter');
+    input.dispatchEvent(new Event('compositionstart')); input.dispatchEvent(new Event('compositionend'));
+    expect(keyboard(input, 'Enter').defaultPrevented).toBe(false);
+    expect(actions.selectNote).not.toHaveBeenCalled();
+    keyboard(input, 'Enter', false, 'keyup');
+    vi.runAllTimers();
+    keyboard(input, 'Enter');
     expect(actions.selectNote).toHaveBeenCalledExactlyOnceWith({ resultId: 'r1', path: 'target.md' });
   });
-  it('does not confirm when composition ends before its IME Enter keydown', async () => {
+  it('ignores Process keys and clears held Enter state on blur', async () => {
+    vi.useFakeTimers();
+    const { input, actions } = setup(async () => ready([{ path: 'first.md', name: 'First' }, { path: 'second.md', name: 'Second' }])); await settle();
+    expect(keyboard(input, 'Process').defaultPrevented).toBe(false);
+    input.dispatchEvent(new Event('compositionstart'));
+    keyboard(input, 'Enter', true);
+    input.dispatchEvent(new Event('compositionend'));
+    vi.runAllTimers();
+    input.dispatchEvent(new Event('blur'));
+    keyboard(input, 'Enter');
+    expect(actions.selectNote).toHaveBeenCalledExactlyOnceWith({ resultId: 'r1', path: 'first.md' });
+  });
+  it.each(['Enter', 'NumpadEnter'])('waits for physical %s release when the IME reports Process', async code => {
+    vi.useFakeTimers();
     const { input, actions } = setup(); await settle();
     input.dispatchEvent(new Event('compositionstart'));
+    expect(keyboard(input, 'Process', true, 'keydown', code).defaultPrevented).toBe(false);
     input.dispatchEvent(new Event('compositionend'));
-    expect(keyboard(input, 'Enter', false, 'keydown', 229).defaultPrevented).toBe(false);
-    expect(keyboard(input, 'Enter').defaultPrevented).toBe(false);
-    expect(actions.selectNote).not.toHaveBeenCalled(); expect(actions.explain).not.toHaveBeenCalled();
-    keyboard(input, 'Enter', false, 'keyup'); keyboard(input, 'Enter');
+    vi.runAllTimers();
+    keyboard(input, 'Enter', false, 'keydown', code, true);
+    expect(actions.selectNote).not.toHaveBeenCalled();
+    keyboard(input, 'Process', false, 'keyup', code);
+    keyboard(input, 'Enter', false, 'keydown', code);
     expect(actions.selectNote).toHaveBeenCalledExactlyOnceWith({ resultId: 'r1', path: 'target.md' });
   });
-  it('leaves an IME navigation key alone before compositionstart is delivered', async () => {
-    const { input, actions } = setup(async () => ready([{ path: 'first.md', name: 'First' }, { path: 'second.md', name: 'Second' }])); await settle();
-    expect(keyboard(input, 'ArrowDown', false, 'keydown', 229).defaultPrevented).toBe(false);
-    keyboard(input, 'Enter'); expect(actions.selectNote).toHaveBeenCalledExactlyOnceWith({ resultId: 'r1', path: 'first.md' });
+  it('restores focus to the search input when a focused retry button is replaced, while preserving external focus', async () => {
+    const doc = new Doc();
+    const panel = new Element('div', doc);
+    const notes = vi.fn()
+      .mockResolvedValueOnce({ kind: 'pending' } satisfies NoteSearchResult)
+      .mockResolvedValueOnce(ready([{ path: 'target.md', name: 'Target' }]));
+    const actions: ToolbarActions = {
+      notes, format: vi.fn(), explain: vi.fn(), quickLink: vi.fn(), selectNote: vi.fn(), cancelNoteRequests: vi.fn(), close: vi.fn(), resize: vi.fn(),
+    };
+    const picker = new NotePicker(panel as unknown as HTMLElement, key => key, actions);
+    const input = panel.children[0]!;
+    const list = panel.children[1]!;
+    input.value = 'tar';
+    await settle();
+    const retry = list.children[0]!;
+    retry.focus();
+    expect(doc.activeElement).toBe(retry);
+    vi.mocked(input.focus).mockClear();
+    retry.dispatchEvent(new Event('click'));
+    expect(input.focus).toHaveBeenCalledTimes(1);
+    expect(doc.activeElement).toBe(input);
+    expect(input.value).toBe('tar');
+    await settle();
+    expect(list.textContent).toBe('Targettarget.md');
+
+    // Automatic refresh while retry is focused also restores focus to input
+    const notes2 = vi.fn()
+      .mockResolvedValueOnce({ kind: 'pending' } satisfies NoteSearchResult)
+      .mockResolvedValueOnce(ready([{ path: 'target.md', name: 'Target' }]));
+    const panel2 = new Element('div', doc);
+    const picker2 = new NotePicker(panel2 as unknown as HTMLElement, key => key, { ...actions, notes: notes2 });
+    const input2 = panel2.children[0]!;
+    const list2 = panel2.children[1]!;
+    input2.value = 'keep';
+    await settle();
+    list2.children[0]!.focus();
+    vi.mocked(input2.focus).mockClear();
+    picker2.refresh();
+    expect(input2.focus).toHaveBeenCalledTimes(1);
+    expect(doc.activeElement).toBe(input2);
+    expect(input2.value).toBe('keep');
+    await settle();
+
+    // Focus outside the list (e.g. a sibling control) is not stolen on refresh
+    const outside = new Element('button', doc);
+    outside.focus();
+    vi.mocked(input2.focus).mockClear();
+    picker2.refresh();
+    expect(input2.focus).not.toHaveBeenCalled();
+    expect(doc.activeElement).toBe(outside);
+    picker.cancel(); picker2.cancel();
   });
   it('explains unavailable targets and leaves native text undo alone', async () => {
     const { input, actions, list } = setup(async () => ready([{ path: 'target.md', name: 'Target', disabledReason: 'tooLong' }])); await settle();

@@ -115,8 +115,8 @@ export class ToolbarPanels {
     const shell = number(style.paddingTop) + number(style.paddingBottom) + number(style.borderTopWidth) + number(style.borderBottomWidth);
     const bodyHeight = Math.floor(height - shell - Math.max(32, back.height) - 8);
     const minimum = this.state.kind === 'palette' ? 36 : this.state.kind === 'notes' ? 72 : 32;
-    const gridStyle = this.body.querySelector('.hover-bar-palette');
-    const gap = gridStyle ? number(window.getComputedStyle(gridStyle).gap) : 8;
+    const grid = this.body.querySelector('.hover-bar-palette:not([hidden])');
+    const gap = grid ? number(window.getComputedStyle(grid).columnGap) : 8;
     const columns = paletteColumns(content, number(style.getPropertyValue('--hover-bar-swatch-min-size')) || 32, gap);
     return { width, bodyHeight, columns, scrollTop: this.palette?.readScrollTop(bodyHeight) ?? this.body.scrollTop,
       fits: content >= 32 && bodyHeight >= minimum && (this.state.kind !== 'palette' || columns >= 1) };

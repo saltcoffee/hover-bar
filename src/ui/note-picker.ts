@@ -1,4 +1,5 @@
 import type { Translate } from '../i18n';
+import { isEnterKey, isImeKey } from './controls';
 import type { NoteNotice } from './panel-navigation';
 import type { NoteChoice, NoteSearchResult, ToolbarActions } from './toolbar-types';
 
@@ -14,6 +15,7 @@ export class NotePicker {
   private generation = 0;
   private disposed = false;
   private runSearch: () => Promise<void> = async () => {};
+  private stopTimers: () => void = () => {};
 
   constructor(panel: HTMLElement, t: Translate, actions: ToolbarActions, options: NotePickerOptions = {}) {
     const input = panel.createEl('input', {
@@ -36,7 +38,20 @@ export class NotePicker {
     this.labelId = label.id = `${list.id}-label`;
     list.setAttribute('aria-labelledby', label.id);
     let choices: readonly NoteChoice[] = []; let options2: HTMLElement[] = []; let active = 0; let resultId = '';
-    let composing = false; let composingEnterHeld = false;
+    let composing = false; let confirming = false; let composingEnterHeld = false;
+    let compositionTimer: number | ReturnType<typeof setTimeout> | undefined;
+    const win = panel.ownerDocument?.defaultView;
+    const clearCompositionTimer = () => {
+      if (compositionTimer === undefined) return;
+      if (win) win.clearTimeout(compositionTimer as number);
+      else clearTimeout(compositionTimer);
+      compositionTimer = undefined;
+    };
+    this.stopTimers = clearCompositionTimer;
+    const restoreFocusFromList = () => {
+      const activeElement = panel.ownerDocument?.activeElement;
+      if (activeElement && list.contains(activeElement)) input.focus({ preventScroll: true });
+    };
     const select = () => {
       for (const [index, option] of options2.entries()) option.setAttribute('aria-selected', String(index === active));
       const option = options2[active];
@@ -48,6 +63,7 @@ export class NotePicker {
       if (choice.disabledReason) actions.explain(choice.disabledReason); else actions.selectNote({ resultId, path: choice.path });
     };
     const renderState = (text: string, retryable: boolean) => {
+      restoreFocusFromList();
       list.setAttribute('aria-busy', 'false'); list.textContent = text; active = 0; resultId = '';
       input.removeAttribute('aria-activedescendant'); truncated.textContent = '';
       if (retryable) {
@@ -60,6 +76,7 @@ export class NotePicker {
       if (this.disposed) return;
       this.abort?.abort(); this.abort = new AbortController();
       const id = ++this.generation;
+      restoreFocusFromList();
       choices = []; options2 = []; resultId = ''; input.removeAttribute('aria-activedescendant');
       list.setAttribute('aria-busy', 'true'); list.textContent = t('searching'); truncated.textContent = ''; actions.resize();
       let result: NoteSearchResult;
@@ -73,6 +90,7 @@ export class NotePicker {
       if (result.kind === 'pending') { renderState(t('metadataPending'), true); return; }
       if (result.kind === 'stale') { renderState(t('candidateStale'), true); return; }
       if (result.kind === 'error') { renderState(t('metadataError'), true); return; }
+      restoreFocusFromList();
       choices = result.items; resultId = result.resultId;
       list.setAttribute('aria-busy', 'false'); list.replaceChildren(); active = 0;
       for (const [index, note] of choices.entries()) {
@@ -89,16 +107,25 @@ export class NotePicker {
       select(); actions.resize();
     };
     input.addEventListener('compositionstart', () => { composing = true; });
-    input.addEventListener('compositionend', () => { composing = false; });
-    input.addEventListener('keyup', event => { if (event.key === 'Enter') composingEnterHeld = false; });
+    input.addEventListener('compositionend', () => {
+      composing = false; confirming = true;
+      clearCompositionTimer();
+      const release = () => { confirming = false; compositionTimer = undefined; };
+      compositionTimer = win ? win.setTimeout(release, 0) : setTimeout(release, 0);
+    });
+    input.addEventListener('keyup', event => { if (isEnterKey(event)) { confirming = false; composingEnterHeld = false; } });
+    input.addEventListener('blur', () => {
+      composing = false; confirming = false; composingEnterHeld = false;
+      clearCompositionTimer();
+    });
     input.addEventListener('input', () => { notice.textContent = ''; void search(); });
     input.addEventListener('keydown', event => {
       // Some IMEs end composition before dispatching their confirmation keydown.
-      if (composing || event.isComposing || event.keyCode === 229) {
-        if (event.key === 'Enter') composingEnterHeld = true;
+      const enter = isEnterKey(event);
+      if (composing || confirming || isImeKey(event) || (enter && composingEnterHeld)) {
+        if (enter) composingEnterHeld = true;
         event.stopPropagation(); return;
       }
-      if (event.key === 'Enter' && composingEnterHeld) { event.stopPropagation(); return; }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault(); event.stopPropagation();
         active = Math.max(0, Math.min(choices.length - 1, active + (event.key === 'ArrowDown' ? 1 : -1))); select();
@@ -113,5 +140,5 @@ export class NotePicker {
   /** Re-run the current query, keeping the input value, caret and focus. */
   refresh(): void { void this.runSearch(); }
 
-  cancel(): void { this.disposed = true; this.generation++; this.abort?.abort(); this.abort = null; }
+  cancel(): void { this.disposed = true; this.generation++; this.stopTimers(); this.abort?.abort(); this.abort = null; }
 }

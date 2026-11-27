@@ -27,3 +27,10 @@ export function setActionState(button: HTMLButtonElement, state: ActionView, lab
 }
 
 export function focusButton(button: HTMLElement | null | undefined): void { button?.focus({ preventScroll: true }); }
+
+export function isImeKey(event: KeyboardEvent): boolean { return event.isComposing || event.key === 'Process'; }
+
+/** An IME can report Process as the logical key while preserving the physical Enter key. */
+export function isEnterKey(event: KeyboardEvent): boolean {
+  return event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter';
+}

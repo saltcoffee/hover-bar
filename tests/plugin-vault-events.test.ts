@@ -16,6 +16,7 @@ vi.mock('obsidian', async importOriginal => ({
 }));
 
 type FileEvent = (file: TAbstractFile, oldPath?: string) => void;
+type MetadataEvent = (file: TFile, data: string, cache: CachedMetadata) => void;
 const plugins: HoverBarPlugin[] = [];
 afterEach(() => { for (const plugin of plugins.splice(0)) plugin.onunload(); });
 
@@ -24,15 +25,17 @@ async function setup(path = 'Notes/A.md') {
   const files = [note];
   const caches = new Map<string, CachedMetadata>([[path, {}]]);
   const vaultEvents = new Map<string, FileEvent>();
-  const metadataEvents = new Map<string, FileEvent>();
+  const metadataEvents = new Map<string, MetadataEvent>();
   const app = {
     workspace: { layoutReady: true, on: vi.fn(), updateOptions: vi.fn() },
     vault: {
       on: (name: string, callback: FileEvent) => { vaultEvents.set(name, callback); },
       getMarkdownFiles: () => [...files],
+      getFileByPath: (path: string) => files.find(file => file.path === path) ?? null,
+      read: async () => 'current',
     },
     metadataCache: {
-      on: (name: string, callback: FileEvent) => { metadataEvents.set(name, callback); },
+      on: (name: string, callback: MetadataEvent) => { metadataEvents.set(name, callback); },
       getFileCache: (file: TFile) => caches.get(file.path) ?? null,
     },
   } as unknown as App;
@@ -52,10 +55,11 @@ describe('vault event file and directory boundaries', () => {
   });
 
   it.each(['create', 'modify'])('waits for a real Markdown file to be indexed after %s', async event => {
-    const { note, vaultEvents, metadataEvents, collect } = await setup();
+    const { note, caches, vaultEvents, metadataEvents, collect } = await setup();
     vaultEvents.get(event)!(note);
     await expect(collect()).resolves.toEqual({ kind: 'pending' });
-    metadataEvents.get('changed')!(note);
+    metadataEvents.get('changed')!(note, 'current', caches.get(note.path)!);
+    await Promise.resolve();
     await expect(collect()).resolves.toMatchObject({ kind: 'ready' });
   });
 
@@ -75,7 +79,8 @@ describe('vault event file and directory boundaries', () => {
     caches.set(note.path, {});
     vaultEvents.get('rename')!(folder, 'Archive.md');
     await expect(collect()).resolves.toEqual({ kind: 'pending' });
-    metadataEvents.get('changed')!(note);
+    metadataEvents.get('changed')!(note, 'current', caches.get(note.path)!);
+    await Promise.resolve();
     await expect(collect()).resolves.toMatchObject({ kind: 'ready' });
   });
 
@@ -86,5 +91,33 @@ describe('vault event file and directory boundaries', () => {
     files.splice(0);
     vaultEvents.get('delete')!(folder);
     await expect(collect()).resolves.toMatchObject({ kind: 'ready' });
+  });
+
+  it('forwards folder rename/delete and same-path file replacement create events to active controllers', async () => {
+    const { note } = await setup('Notes/A.md');
+    const controller = {
+      handleExternalFileChange: vi.fn(),
+      handleExternalFileCreate: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const vaultE = new Map<string, FileEvent>();
+    const app = {
+      workspace: { layoutReady: true, on: vi.fn(), updateOptions: vi.fn() },
+      vault: { on: (name: string, cb: FileEvent) => { vaultE.set(name, cb); }, getMarkdownFiles: () => [note] },
+      metadataCache: { on: vi.fn(), getFileCache: () => ({}) },
+    } as unknown as App;
+    const plugin = new HoverBarPlugin(app, {} as PluginManifest);
+    plugins.push(plugin);
+    await plugin.onload();
+    plugin['controllers'].add(controller as never);
+
+    const folder = Object.assign(new TFolder(), { path: 'Notes-new', name: 'Notes-new', children: [] });
+    vaultE.get('rename')!(folder, 'Notes');
+    expect(controller.handleExternalFileChange).toHaveBeenCalledWith(folder, 'Notes');
+    vaultE.get('delete')!(folder);
+    expect(controller.handleExternalFileChange).toHaveBeenCalledWith(folder);
+    const replacement = Object.assign(new TFile(), { path: 'Notes/A.md', name: 'A.md', basename: 'A', extension: 'md' });
+    vaultE.get('create')!(replacement);
+    expect(controller.handleExternalFileCreate).toHaveBeenCalledWith(replacement);
   });
 });

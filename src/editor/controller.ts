@@ -1,19 +1,20 @@
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { undo, redo } from '@codemirror/commands';
-import { editorInfoField, editorLivePreviewField, Scope, type App, type TFile } from 'obsidian';
+import { editorInfoField, editorLivePreviewField, Scope, TFolder, type App, type TAbstractFile, type TFile } from 'obsidian';
 import type { Translate } from '../i18n';
 import type { EditPlan, FormatAction } from '../formatting/types';
 import { PreferencesStore } from '../settings/store';
+import { isImeKey } from '../ui/controls';
 import { Toolbar, type ToolbarMeasurement } from '../ui/toolbar';
 import type { ActionOutcome, NoteChoice, NoteSearchResult, NoteSelection } from '../ui/toolbar-types';
 import { place, viewportBounds } from '../ui/position';
-import { exactTargetPaths, normalizeQuery, searchRecords, sortRecordsByPath, type NoteMatch, type NoteRecord } from '../links/note-search';
+import { exactTargetPaths, normalizeQuery, searchRecords, searchTop, sortRecordsByPath, type NoteMatch, type NoteRecord } from '../links/note-search';
 import { applyEdit, ownEdit } from './apply-edit';
 import { capture, matchesSnapshot, sameSelectionSession, type SelectionSnapshot } from './context';
 import { actionFeedback, selectionFeedback } from './feedback';
 import { formatSelection, linkSelection } from './selection-actions';
 import { toolbarModel } from './toolbar-model';
-import { metadataSignature, type NoteMetadataEntry, type NoteMetadataSource } from './note-metadata';
+import { metadataSignature, type MetadataResult, type NoteMetadataEntry, type NoteMetadataSource } from './note-metadata';
 
 export type CloseReason = 'dismiss' | 'linkApplied' | 'stale' | 'outside' | 'windowBlur' | 'modeChanged' | 'noSpace' | 'failed' | 'destroy';
 interface CommitResult { readonly edited: boolean; readonly outcome: ActionOutcome }
@@ -33,7 +34,15 @@ interface PickerSnapshot {
   readonly epoch: number;
   readonly byPath: ReadonlyMap<string, NoteMetadataEntry>;
   readonly records: readonly NoteRecord[];
-  sortedByPath: readonly NoteMetadataEntry[] | null;
+  firstPage: readonly NoteMetadataEntry[] | null;
+}
+
+interface InflightPickerCollect {
+  readonly sessionKey: string;
+  readonly panelGeneration: number;
+  readonly epoch: number;
+  readonly abort: AbortController;
+  readonly promise: Promise<MetadataResult>;
 }
 
 // When one endpoint of a long selection is off-screen, keep the visual span only while it stays
@@ -64,10 +73,14 @@ export class EditorController {
   private readonly scope: Scope;
   private scopeActive = false;
   private noteRequest = 0;
+  private pickerGeneration = 0;
   private notesAbort: AbortController | null = null;
+  private pickerCollect: InflightPickerCollect | null = null;
   private noteEvidence: NoteEvidence | null = null;
   private pickerSnapshot: PickerSnapshot | null = null;
   private quickPending: { readonly query: string; readonly request: number } | null = null;
+  private refreshQueued = false;
+  private refreshGeneration = 0;
   private readonly unsubscribeMetadata: () => void;
 
   constructor(readonly view: EditorView, private readonly host: Host) {
@@ -82,7 +95,7 @@ export class EditorController {
     });
     this.scope = new Scope(host.app.scope);
     this.scope.register([], 'Escape', event => {
-      if (!this.toolbar.visible || !this.toolbar.ownsFocus() || event.isComposing || event.keyCode === 229) return;
+      if (!this.toolbar.visible || !this.toolbar.ownsFocus() || this.toolbar.isComposing() || isImeKey(event)) return;
       // Host hotkeys run before DOM bubbling. Consume Escape here so the host
       // cannot move focus back to the editor before the panel restores its row.
       this.toolbar.escape(); event.stopPropagation(); return false;
@@ -336,18 +349,22 @@ export class EditorController {
     if (!current || metadataSignature(current) !== entry.signature) { this.failCandidate(); return; }
     const plan = this.linkPlanFor(snapshot, file);
     if (plan) this.commit(snapshot, plan, true);
+    else this.toolbar.refreshNotes();
   }
 
   private failCandidate(): void { this.close('stale'); this.host.notify(this.host.t('candidateStale')); }
 
   private linkPlanFor(snapshot: SelectionSnapshot, file: TFile): EditPlan | null {
-    const target = this.host.app.metadataCache.fileToLinktext(file, snapshot.path, true);
-    const result = linkSelection(snapshot, target);
-    if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return null; }
-    if (this.host.app.metadataCache.getFirstLinkpathDest(target, snapshot.path) !== file) {
-      this.host.notify(this.host.t('invalidLink')); return null;
+    try {
+      const target = this.host.app.metadataCache.fileToLinktext(file, snapshot.path, true);
+      const result = linkSelection(snapshot, target);
+      if (result.kind === 'unavailable') { this.host.notify(this.host.t(actionFeedback(result.reason))); return null; }
+      if (this.host.app.metadataCache.getFirstLinkpathDest(target, snapshot.path) === file) return result.plan;
+    } catch {
+      // A failed host lookup has the same outcome as an unresolved target.
     }
-    return result.plan;
+    this.host.notify(this.host.t('invalidLink'));
+    return null;
   }
 
   private async notes(query: string, signal: AbortSignal): Promise<NoteSearchResult> {
@@ -355,15 +372,34 @@ export class EditorController {
     if (!session || this.destroyed || signal.aborted) return { kind: 'cancelled' };
     const request = ++this.noteRequest;
     // A picker search supersedes any quick-link request that has not yet opened the picker.
+    if (this.notesAbort) { this.notesAbort.abort(); this.notesAbort = null; }
     this.quickPending = null;
+    this.noteEvidence = null;
     const key = selectionKey(session);
-    const isValid = () => !this.destroyed && this.current === session && this.noteRequest === request && !signal.aborted;
+    const isValid = () => !this.destroyed && this.isCurrent(session) && this.noteRequest === request && !signal.aborted;
     let snapshot = this.pickerSnapshot && this.pickerSnapshot.sessionKey === key &&
       this.host.metadata.canReuseSnapshot(this.pickerSnapshot.epoch)
       ? this.pickerSnapshot : null;
     if (!snapshot) {
       this.pickerSnapshot = null;
-      const meta = await this.host.metadata.collect(signal, isValid, () => new Promise<void>(resolve => this.window.setTimeout(resolve, 0)));
+      const panelGen = this.pickerGeneration;
+      const startEpoch = this.host.metadata.currentEpoch;
+      let inflight = this.pickerCollect;
+      if (!inflight || inflight.sessionKey !== key || inflight.panelGeneration !== panelGen ||
+          inflight.epoch !== startEpoch || inflight.abort.signal.aborted) {
+        this.abortPickerCollect();
+        const abort = new AbortController();
+        const isCollectValid = () => !this.destroyed && this.isCurrent(session) &&
+          this.pickerGeneration === panelGen && !abort.signal.aborted &&
+          this.host.metadata.currentEpoch === startEpoch;
+        const promise = this.host.metadata.collect(abort.signal, isCollectValid, () => new Promise<void>(resolve => this.window.setTimeout(resolve, 0)));
+        const created: InflightPickerCollect = { sessionKey: key, panelGeneration: panelGen, epoch: startEpoch, abort, promise };
+        this.pickerCollect = created;
+        const cleanup = () => { if (this.pickerCollect === created) this.pickerCollect = null; };
+        promise.then(cleanup, cleanup);
+        inflight = created;
+      }
+      const meta = await inflight.promise;
       if (!isValid()) return { kind: 'cancelled' };
       if (meta.kind !== 'ready') {
         if (meta.kind === 'pending') return { kind: 'pending' };
@@ -372,24 +408,30 @@ export class EditorController {
         return { kind: 'cancelled' };
       }
       if (!this.host.metadata.canReuseSnapshot(meta.epoch)) return { kind: 'stale' };
-      const byPath = new Map(meta.entries.map(entry => [entry.record.path, entry] as const));
-      const records = meta.entries.map(entry => entry.record);
-      snapshot = { sessionKey: key, epoch: meta.epoch, byPath, records, sortedByPath: null };
-      this.pickerSnapshot = snapshot;
+      snapshot = this.reusableSnapshot(key, meta.epoch);
+      if (!snapshot) {
+        const byPath = new Map<string, NoteMetadataEntry>();
+        const records: NoteRecord[] = [];
+        for (const entry of meta.entries) {
+          byPath.set(entry.record.path, entry);
+          records.push(entry.record);
+        }
+        snapshot = { sessionKey: key, epoch: meta.epoch, byPath, records, firstPage: null };
+        this.pickerSnapshot = snapshot;
+      }
     }
     const queryKey = normalizeQuery(query);
     let pageEntries: readonly NoteMetadataEntry[];
     let items: NoteChoice[];
     let matchedCount: number;
     if (!queryKey) {
-      snapshot.sortedByPath ??= sortRecordsByPath(snapshot.records).map(record => snapshot.byPath.get(record.path)!);
-      matchedCount = snapshot.sortedByPath.length;
-      pageEntries = snapshot.sortedByPath.slice(0, 50);
+      matchedCount = snapshot.records.length;
+      snapshot.firstPage ??= sortRecordsByPath(snapshot.records).slice(0, 50).map(note => snapshot.byPath.get(note.path)!);
+      pageEntries = snapshot.firstPage;
       items = pageEntries.map(entry => this.choice(session, entry, null));
     } else {
-      const matches = searchRecords(snapshot.records, queryKey);
-      matchedCount = matches.length;
-      const page = matches.slice(0, 50);
+      const { items: page, matchedCount: total } = searchTop(snapshot.records, queryKey, 50);
+      matchedCount = total;
       pageEntries = page.map(match => snapshot.byPath.get(match.path)!);
       items = page.map(match => this.choice(session, snapshot.byPath.get(match.path)!, match));
     }
@@ -398,6 +440,11 @@ export class EditorController {
     const entries = new Map(pageEntries.map(entry => [entry.record.path, { file: entry.file, signature: entry.signature }] as const));
     this.noteEvidence = { resultId, request, sessionKey: key, epoch: snapshot.epoch, entries };
     return { kind: 'ready', resultId, items, matchedCount, hasMore: matchedCount > 50 };
+  }
+
+  private reusableSnapshot(sessionKey: string, epoch: number): PickerSnapshot | null {
+    return this.pickerSnapshot && this.pickerSnapshot.sessionKey === sessionKey && this.pickerSnapshot.epoch === epoch
+      ? this.pickerSnapshot : null;
   }
 
   private choice(session: SelectionSnapshot, entry: NoteMetadataEntry, match: NoteMatch | null): NoteChoice {
@@ -421,24 +468,49 @@ export class EditorController {
     }
   }
 
+  private abortPickerCollect(): void {
+    if (this.pickerCollect) { this.pickerCollect.abort.abort(); this.pickerCollect = null; }
+  }
+
   cancelNoteRequests(): void {
     this.noteRequest++;
+    this.pickerGeneration++;
     if (this.notesAbort) { this.notesAbort.abort(); this.notesAbort = null; }
+    this.abortPickerCollect();
     this.noteEvidence = null;
     this.pickerSnapshot = null;
     this.quickPending = null;
+    this.refreshQueued = false;
+    this.refreshGeneration++;
   }
 
-  /** Called after a source note is renamed/deleted: end the session if it was the active note. */
-  handleExternalFileChange(...paths: string[]): void {
-    if (this.destroyed) return;
-    if (this.current && paths.includes(this.current.path)) this.close('stale');
+  /** Called after a note or directory is renamed/deleted: end the session if it was the active note. */
+  handleExternalFileChange(file: TAbstractFile, oldPath?: string): void {
+    if (this.destroyed || !this.current) return;
+    if (file instanceof TFolder) {
+      if (this.current.path.startsWith(`${file.path}/`) || (oldPath !== undefined && this.current.path.startsWith(`${oldPath}/`))) {
+        this.close('stale');
+      }
+      return;
+    }
+    if (this.current.file === file || this.current.path === file.path || (oldPath !== undefined && this.current.path === oldPath)) {
+      this.close('stale');
+    }
+  }
+
+  /** Called when a file is created: end the session if it replaced the active note at the same path. */
+  handleExternalFileCreate(file: TFile): void {
+    if (!this.destroyed && this.current && this.current.path === file.path && this.current.file !== file) {
+      this.close('stale');
+    }
   }
 
   private onMetadataChanged(): void {
     if (this.destroyed) return;
     this.noteEvidence = null;
     this.pickerSnapshot = null;
+    this.pickerGeneration++;
+    this.abortPickerCollect();
     this.notesAbort?.abort(); this.notesAbort = null;
     const quick = this.quickPending;
     if (quick) {
@@ -446,7 +518,17 @@ export class EditorController {
       if (this.current && this.toolbar.visible) this.toolbar.notePicker(quick.query, 'stale');
       return;
     }
-    if (this.toolbar.visible) this.toolbar.refreshNotes();
+    if (this.current && !matchesSnapshot(this.view, this.current)) { this.close('stale'); return; }
+    if (this.toolbar.visible && !this.refreshQueued) {
+      this.refreshQueued = true;
+      const refreshGen = this.refreshGeneration;
+      queueMicrotask(() => {
+        this.refreshQueued = false;
+        if (this.destroyed || !this.current || !this.toolbar.visible || this.refreshGeneration !== refreshGen) return;
+        if (!matchesSnapshot(this.view, this.current)) { this.close('stale'); return; }
+        this.toolbar.refreshNotes();
+      });
+    }
   }
 
   private measure(): void {

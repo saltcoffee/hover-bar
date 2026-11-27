@@ -1,7 +1,7 @@
 import { setIcon } from 'obsidian';
 import type { Translate } from '../i18n';
 import { isCanonicalHex, normalizeHex } from '../formatting/colors';
-import { focusButton, setActionState } from './controls';
+import { focusButton, isEnterKey, isImeKey, setActionState } from './controls';
 import type { PaletteKind, SwatchView, ToolbarActions, ToolbarViewModel } from './toolbar-types';
 
 type Group = 'recent' | 'presets';
@@ -55,11 +55,15 @@ export class ColorPalette {
       this.document.defaultView!.clearTimeout(this.compositionTimer);
       this.compositionTimer = this.document.defaultView!.setTimeout(() => { this.confirming = false; }, 0);
     });
-    this.input.addEventListener('keyup', event => { if (event.key === 'Enter') { this.confirming = false; this.composingEnterHeld = false; } });
-    this.input.addEventListener('blur', () => { this.composingEnterHeld = false; });
+    this.input.addEventListener('keyup', event => { if (isEnterKey(event)) { this.confirming = false; this.composingEnterHeld = false; } });
+    this.input.addEventListener('blur', () => {
+      this.composing = false; this.confirming = false; this.composingEnterHeld = false;
+      this.document.defaultView!.clearTimeout(this.compositionTimer);
+    });
     this.input.addEventListener('keydown', event => {
-      if (this.composing || this.confirming || event.isComposing || event.keyCode === 229 || (event.key === 'Enter' && this.composingEnterHeld)) {
-        if (event.key === 'Enter') this.composingEnterHeld = true;
+      const enter = isEnterKey(event);
+      if (this.composing || this.confirming || isImeKey(event) || (enter && this.composingEnterHeld)) {
+        if (enter) this.composingEnterHeld = true;
         event.stopPropagation(); return;
       }
       if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); this.applyColor(); }
