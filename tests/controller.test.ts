@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { App, MarkdownFileInfo, TFile } from 'obsidian';
+import { TFile, TFolder, type App, type MarkdownFileInfo } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
@@ -30,6 +30,7 @@ vi.mock('../src/ui/toolbar', () => ({
     positioned = vi.fn();
     contains = vi.fn();
     ownsFocus = vi.fn(() => false);
+    isComposing = vi.fn(() => false);
     destroy = vi.fn();
     show = vi.fn(() => { this.visible = true; });
     hide() { this.visible = false; }
@@ -97,7 +98,7 @@ describe('selection toolbar focus and placement', () => {
     toolbar.root.dispatchEvent(new Event('focusin')); toolbar.root.dispatchEvent(new Event('focusin'));
     expect(keymap.pushScope).toHaveBeenCalledTimes(1);
     const scope = controller['scope'] as unknown as TestScope;
-    const event = Object.assign(new Event('keydown', { cancelable: true }), { isComposing: false, keyCode: 0 });
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', isComposing: false });
     expect(scope.handlers.get('Escape')!(event as unknown as KeyboardEvent)).toBe(false);
     expect(toolbar.escape).toHaveBeenCalledTimes(1);
     controller.close('dismiss'); controller.destroy();
@@ -107,8 +108,13 @@ describe('selection toolbar focus and placement', () => {
     const { controller, toolbar, flush, keymap } = setup(); controller.show(true); flush();
     vi.mocked(toolbar.ownsFocus).mockReturnValue(true); toolbar.root.dispatchEvent(new Event('focusin'));
     const scope = controller['scope'] as unknown as TestScope;
-    const event = Object.assign(new Event('keydown'), { isComposing: true, keyCode: 229 });
-    expect(scope.handlers.get('Escape')!(event as unknown as KeyboardEvent)).toBeUndefined();
+    const composingEvent = Object.assign(new Event('keydown'), { key: 'Escape', isComposing: true });
+    expect(scope.handlers.get('Escape')!(composingEvent as unknown as KeyboardEvent)).toBeUndefined();
+    const processEvent = Object.assign(new Event('keydown'), { key: 'Process', isComposing: false });
+    expect(scope.handlers.get('Escape')!(processEvent as unknown as KeyboardEvent)).toBeUndefined();
+    vi.mocked(toolbar.isComposing).mockReturnValueOnce(true);
+    const toolbarComposingEvent = Object.assign(new Event('keydown'), { key: 'Escape', isComposing: false });
+    expect(scope.handlers.get('Escape')!(toolbarComposingEvent as unknown as KeyboardEvent)).toBeUndefined();
     expect(toolbar.escape).not.toHaveBeenCalled();
     vi.mocked(toolbar.ownsFocus).mockReturnValue(false); toolbar.root.dispatchEvent(new Event('focusout')); await Promise.resolve();
     expect(keymap.popScope).toHaveBeenCalledTimes(1); expect(toolbar.visible).toBe(true); controller.destroy();
@@ -462,6 +468,167 @@ describe('picker snapshot reuse and quick-link freshness', () => {
     await controller['runQuickLink']();
     expect(collect).toHaveBeenCalledTimes(4);
     expect(toolbarNotePicker).toHaveBeenCalledWith('word', undefined);
+    controller.destroy();
+  });
+
+  it('shares a single in-flight collect across rapid sequential picker queries and publishes only the latest query', async () => {
+    const entries = [noteEntry('a/Alpha.md', ['TermA']), noteEntry('b/Beta.md', ['TermB'])];
+    const { controller, collect } = noteSearchSetup(entries);
+    let release!: (value: MetadataResult) => void;
+    collect.mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { release = resolve; }));
+    const reqA = controller['notes']('TermA', new AbortController().signal);
+    const reqB = controller['notes']('TermB', new AbortController().signal);
+    expect(collect).toHaveBeenCalledTimes(1);
+    release({ kind: 'ready', epoch: 0, entries });
+    await expect(reqA).resolves.toEqual({ kind: 'cancelled' });
+    await expect(reqB).resolves.toMatchObject({ kind: 'ready', matchedCount: 1, items: [{ path: 'b/Beta.md' }] });
+    expect(controller['noteEvidence']?.entries.has('b/Beta.md')).toBe(true);
+    expect(controller['noteEvidence']?.entries.has('a/Alpha.md')).toBe(false);
+    controller.destroy();
+  });
+
+  it('prevents an older in-flight collect from clearing a newer epoch collect when metadata changes mid-flight', async () => {
+    const entries = [noteEntry('a/Alpha.md')];
+    const { controller, collect, bumpEpoch } = noteSearchSetup(entries);
+    let releaseA!: (value: MetadataResult) => void;
+    let releaseB!: (value: MetadataResult) => void;
+    collect
+      .mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { releaseA = resolve; }))
+      .mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { releaseB = resolve; }));
+    const reqA = controller['notes']('Alpha', new AbortController().signal);
+    bumpEpoch();
+    const reqB = controller['notes']('Alpha', new AbortController().signal);
+    const inflightB = controller['pickerCollect'];
+    expect(inflightB).not.toBeNull();
+    releaseA({ kind: 'ready', epoch: 0, entries });
+    await expect(reqA).resolves.toEqual({ kind: 'cancelled' });
+    expect(controller['pickerCollect']).toBe(inflightB);
+    releaseB({ kind: 'ready', epoch: 1, entries });
+    await expect(reqB).resolves.toMatchObject({ kind: 'ready', matchedCount: 1 });
+    controller.destroy();
+  });
+
+  it('prevents a superseded quick-link from editing or opening the picker once a picker search starts', async () => {
+    const entries = [noteEntry('a/word.md')];
+    const { controller, collect, toolbarNotePicker, view } = noteSearchSetup(entries);
+    let releaseQuick!: (value: MetadataResult) => void;
+    collect
+      .mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { releaseQuick = resolve; }))
+      .mockImplementationOnce(async () => ({ kind: 'ready', epoch: 0, entries }));
+    const quick = controller['runQuickLink']();
+    const picker = await controller['notes']('word', new AbortController().signal);
+    expect(picker).toMatchObject({ kind: 'ready', matchedCount: 1 });
+    releaseQuick({ kind: 'ready', epoch: 0, entries });
+    await quick;
+    expect(toolbarNotePicker).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe('          word');
+    controller.destroy();
+  });
+
+  it('cancels an in-flight picker collect when quick-link starts', async () => {
+    const entries = [noteEntry('a/word.md')];
+    const { controller, collect, toolbarNotePicker } = noteSearchSetup(entries);
+    let releasePicker!: (value: MetadataResult) => void;
+    collect
+      .mockImplementationOnce(() => new Promise<MetadataResult>(resolve => { releasePicker = resolve; }))
+      .mockImplementationOnce(async () => ({ kind: 'ready', epoch: 0, entries: [...entries, noteEntry('b/word.md')] }));
+    const picker = controller['notes']('word', new AbortController().signal);
+    await controller['runQuickLink']();
+    releasePicker({ kind: 'ready', epoch: 0, entries });
+    await expect(picker).resolves.toEqual({ kind: 'cancelled' });
+    expect(controller['noteEvidence']).toBeNull();
+    expect(toolbarNotePicker).toHaveBeenCalledWith('word', 'conflict');
+    controller.destroy();
+  });
+
+  it.each(['missing', 'error'])('refreshes the original picker after a superseding quick-link has a %s resolution', async resolution => {
+    const entries = [noteEntry('a/Target.md', ['word'])];
+    const { controller, collect, notify, view, toolbarNotePicker } = noteSearchSetup(entries);
+    const refreshNotes = vi.spyOn(controller['toolbar'], 'refreshNotes');
+    vi.spyOn(controller['host'].app.metadataCache, 'getFirstLinkpathDest').mockImplementation(() => {
+      if (resolution === 'error') throw Error('lookup failed');
+      return null;
+    });
+    let releasePicker!: (result: MetadataResult) => void;
+    collect.mockImplementationOnce(() => new Promise(resolve => { releasePicker = resolve; }));
+    const picker = controller['notes']('Target', new AbortController().signal);
+    await controller['runQuickLink']();
+    releasePicker({ kind: 'ready', epoch: 0, entries });
+    await expect(picker).resolves.toEqual({ kind: 'cancelled' });
+    expect(notify).toHaveBeenCalledWith('invalidLink');
+    expect(refreshNotes).toHaveBeenCalledTimes(1);
+    expect(toolbarNotePicker).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe('          word');
+    controller.destroy();
+  });
+
+  it('coalesces multiple metadata notifications in the same turn into one picker refresh and cancels queued refresh on cancelNoteRequests', async () => {
+    const entries = [noteEntry('a/Alpha.md')];
+    const { controller, bumpEpoch } = noteSearchSetup(entries);
+    const refreshNotes = (controller['toolbar'] as unknown as { refreshNotes: ReturnType<typeof vi.fn> }).refreshNotes;
+    bumpEpoch();
+    bumpEpoch();
+    bumpEpoch();
+    expect(refreshNotes).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(refreshNotes).toHaveBeenCalledTimes(1);
+
+    refreshNotes.mockClear();
+    bumpEpoch();
+    controller.cancelNoteRequests();
+    await Promise.resolve();
+    expect(refreshNotes).not.toHaveBeenCalled();
+    controller.destroy();
+  });
+
+  it('cleans up pickerCollect when collect rejects and allows a subsequent retry', async () => {
+    const entries = [noteEntry('a/Alpha.md')];
+    const { controller, collect } = noteSearchSetup(entries);
+    let rejectCollect!: (error: Error) => void;
+    collect
+      .mockImplementationOnce(() => new Promise<MetadataResult>((_resolve, reject) => { rejectCollect = reject; }))
+      .mockImplementationOnce(async () => ({ kind: 'ready', epoch: 0, entries }));
+    const failed = controller['notes']('Alpha', new AbortController().signal);
+    expect(controller['pickerCollect']).not.toBeNull();
+    rejectCollect(Error('Vault read error'));
+    await expect(failed).rejects.toThrow('Vault read error');
+    expect(controller['pickerCollect']).toBeNull();
+    await expect(controller['notes']('Alpha', new AbortController().signal)).resolves.toMatchObject({ kind: 'ready', matchedCount: 1 });
+    controller.destroy();
+  });
+
+  it('closes the active session on ancestor folder rename/delete or same-path file replacement without closing on sibling prefixes', () => {
+    const { controller, toolbar, flush } = setup();
+    const sourceFile = Object.assign(new TFile(), { path: 'notes/test.md', basename: 'test', extension: 'md' });
+    scenario.snapshot = { ...scenario.snapshot!, file: sourceFile, path: 'notes/test.md' };
+    controller.show(true); flush();
+    expect(toolbar.visible).toBe(true);
+
+    // Sibling folder prefix must NOT close the session
+    const siblingFolder = Object.assign(new TFolder(), { path: 'notes-old', name: 'notes-old', children: [] });
+    controller.handleExternalFileChange(siblingFolder, 'notes-backup');
+    expect(toolbar.visible).toBe(true);
+
+    // Ancestor folder rename closes the session
+    const renamedFolder = Object.assign(new TFolder(), { path: 'archive', name: 'archive', children: [] });
+    controller.handleExternalFileChange(renamedFolder, 'notes');
+    expect(toolbar.visible).toBe(false);
+
+    // Reopen and verify ancestor folder delete closes the session
+    controller.show(true); flush();
+    expect(toolbar.visible).toBe(true);
+    const deletedFolder = Object.assign(new TFolder(), { path: 'notes', name: 'notes', children: [] });
+    controller.handleExternalFileChange(deletedFolder);
+    expect(toolbar.visible).toBe(false);
+
+    // Reopen and verify same-path new TFile create closes the session, while same instance does not
+    controller.show(true); flush();
+    expect(toolbar.visible).toBe(true);
+    controller.handleExternalFileCreate(sourceFile);
+    expect(toolbar.visible).toBe(true);
+    const replacedFile = Object.assign(new TFile(), { path: 'notes/test.md', basename: 'test', extension: 'md' });
+    controller.handleExternalFileCreate(replacedFile);
+    expect(toolbar.visible).toBe(false);
     controller.destroy();
   });
 });

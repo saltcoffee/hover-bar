@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canonicalAliases, compareMatches, exactTargetPaths, matchNote, normalizeQuery,
-  searchRecords, sortRecordsByPath, type NoteRecord,
+  searchRecords, searchTop, sortRecordsByPath, type NoteRecord,
 } from '../src/links/note-search';
 
 const records: readonly NoteRecord[] = [
@@ -74,5 +74,39 @@ describe('deterministic ordering and exact targets', () => {
     const a = { path: 'A.md', priority: 3 as const, kind: 'pathContains' as const };
     const b = { path: 'a.md', priority: 3 as const, kind: 'pathContains' as const };
     expect(compareMatches(a, b)).toBeLessThan(0);
+  });
+});
+
+describe('bounded search parity with full search', () => {
+  it('matches searchRecords exactly across edge cases, Chinese, duplicates, and 49/50/51 boundaries', () => {
+    const corpus: NoteRecord[] = [
+      ...Array.from({ length: 52 }, (_, i) => ({
+        path: `dir/${String(52 - i).padStart(2, '0')}.md`,
+        name: `Note${i}`,
+        aliases: [`Term${String(i).padStart(2, '0')}`, i % 2 === 0 ? '项目' : '专题'],
+      })),
+      { path: 'z/LateExact.md', name: 'Term', aliases: ['Dup', 'dup'] },
+      { path: 'a/EarlyContains.md', name: 'Other', aliases: ['SomeTermHere'] },
+      { path: 'm/Chinese.md', name: '项目计划', aliases: ['TermA', '项'] },
+    ];
+    for (const raw of ['', 'term', 'TERM', '项目', '项', 'dup', 'dir/4', 'lateexact', 'zzz']) {
+      const q = normalizeQuery(raw);
+      const full = searchRecords(corpus, q);
+      const top = searchTop(corpus, q, 50);
+      expect(top.matchedCount).toBe(full.length);
+      expect(top.items).toEqual(full.slice(0, 50));
+    }
+    for (const count of [49, 50, 51]) {
+      const subset = Array.from({ length: count }, (_, i) => ({
+        path: `p/${String(count - i).padStart(2, '0')}.md`,
+        name: `K${i}`,
+        aliases: ['Shared'],
+      }));
+      const q = 'shared';
+      const full = searchRecords(subset, q);
+      const top = searchTop(subset, q, 50);
+      expect(top.matchedCount).toBe(count);
+      expect(top.items).toEqual(full.slice(0, 50));
+    }
   });
 });

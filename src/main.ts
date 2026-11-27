@@ -62,24 +62,27 @@ export default class HoverBarPlugin extends Plugin {
     }));
     // Source-file identity loss ends the session; other target changes only invalidate candidates.
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      for (const controller of this.controllers) controller.handleExternalFileChange(oldPath, file.path);
+      for (const controller of this.controllers) controller.handleExternalFileChange(file, oldPath);
       this.metadata.fileRenamed(oldPath, file.path);
     }));
     this.registerEvent(this.app.vault.on('delete', file => {
-      for (const controller of this.controllers) controller.handleExternalFileChange(file.path);
-      this.metadata.fileDeleted(file.path);
+      for (const controller of this.controllers) controller.handleExternalFileChange(file);
+      this.metadata.fileDeleted(file);
     }));
     // A folder can end in .md, but it will never receive a file indexing notification.
     this.registerEvent(this.app.vault.on('create', file => {
-      if (file instanceof TFile) this.metadata.fileCreated(file.path);
+      if (file instanceof TFile) {
+        for (const controller of this.controllers) controller.handleExternalFileCreate(file);
+        this.metadata.fileModified(file);
+      }
     }));
     this.registerEvent(this.app.vault.on('modify', file => {
-      if (file instanceof TFile) this.metadata.fileModified(file.path);
+      if (file instanceof TFile) this.metadata.fileModified(file);
     }));
     // A metadata re-index confirms the file's latest content change; 'resolve'/'resolved' describe
     // link resolution rather than cache freshness and are intentionally not used here.
-    this.registerEvent(this.app.metadataCache.on('changed', file => this.metadata.fileChanged(file.path)));
-    this.registerEvent(this.app.metadataCache.on('deleted', file => this.metadata.fileDeleted(file.path)));
+    this.registerEvent(this.app.metadataCache.on('changed', (file, data, cache) => this.metadata.fileChanged(file, data, cache)));
+    this.registerEvent(this.app.metadataCache.on('deleted', file => this.metadata.fileDeleted(file)));
     if (!this.store.enabled) new Notice(this.t(this.store.status === 'schemaError' ? 'schemaError' : 'loadError'));
   }
 

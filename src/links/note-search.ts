@@ -27,6 +27,11 @@ export interface NoteMatch {
   readonly matchedAlias?: string;
 }
 
+export interface TopSearchResult {
+  readonly items: readonly NoteMatch[];
+  readonly matchedCount: number;
+}
+
 /** Comparisons use fixed UTF-16 code-unit order, never locale-aware collation. */
 function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -95,6 +100,31 @@ export function searchRecords(records: readonly NoteRecord[], queryKey: string):
     if (match) matches.push(match);
   }
   return matches.sort(compareMatches);
+}
+
+/** Count all matches, retaining only the best page in priority and path order. */
+export function searchTop(records: readonly NoteRecord[], queryKey: string, limit: number): TopSearchResult {
+  if (!queryKey || limit <= 0) return { items: [], matchedCount: 0 };
+  const items: NoteMatch[] = [];
+  let matchedCount = 0;
+  for (const record of records) {
+    const match = matchNote(record, queryKey);
+    if (!match) continue;
+    matchedCount++;
+    const last = items[limit - 1];
+    if (last && compareMatches(match, last) >= 0) continue;
+
+    let from = 0;
+    let to = items.length;
+    while (from < to) {
+      const middle = (from + to) >>> 1;
+      if (compareMatches(match, items[middle]!) < 0) to = middle;
+      else from = middle + 1;
+    }
+    items.splice(from, 0, match);
+    if (items.length > limit) items.pop();
+  }
+  return { items, matchedCount };
 }
 
 /** Records ordered by original path for an empty query. */

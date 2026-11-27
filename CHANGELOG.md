@@ -2,6 +2,20 @@
 
 Notable changes to Hover Bar, grouped by release.
 
+## 1.1.1 — 2026-11-27
+
+### Changed
+
+- Share a single in-flight vault metadata collection across consecutive note-picker queries within the same selection session, panel lifecycle, and metadata epoch so rapid typing no longer aborts and restarts full-vault scans.
+- Keep only the highest-ranked page during note matching and reuse the empty-query page within a picker snapshot. Preserve match priorities, UTF-16 path order, total matched counts, and full exact-match conflict detection for quick-link.
+- Replace `document.createDocumentFragment()` in toolbar initialization with Obsidian's container helper on the toolbar element and migrate IME checks off deprecated `KeyboardEvent.keyCode === 229` to `isComposing`, `key === 'Process'`, toolbar composition tracking, and composition-end confirmation guards.
+
+### Fixed
+
+- Verify metadata notifications for pending files against disk content and cache identity. Retry verification after a move or a transient read failure, coalesce bursts of metadata refresh events per microtask, and close active sessions when an ancestor directory is renamed/deleted or the active note path is replaced by a newly created file.
+- Restore focus to the note-picker search input (preserving query text and caret) when a focused retry button is removed by a manual retry or automatic metadata recovery.
+- Refresh the open picker when a quick-link target fails validation, and keep an IME confirmation reported as `Process` held until the physical Enter key is released.
+
 ## 0.1.8 — 2026-11-20
 
 ### Changed

@@ -9,6 +9,8 @@ export const editorInfoField = StateField.define<MarkdownFileInfo>({
 export const editorLivePreviewField = StateField.define<boolean>({ create: () => true, update: value => value });
 export class MarkdownView { editor = {} as Editor; getMode(): string { return 'source'; } }
 export class Scope { register(): void {} }
+export class TFile {}
+export class TFolder {}
 export function setIcon(element: HTMLElement, name: string): void { element.textContent = name.slice(0, 1); }
 interface BrowserElementInfo { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean | null>; type?: string; placeholder?: string; value?: string; prepend?: boolean }
 if (typeof Node !== 'undefined' && !('createEl' in Node.prototype)) {

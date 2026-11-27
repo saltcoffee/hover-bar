@@ -1,6 +1,6 @@
 import type { Translate } from '../i18n';
 import { ACTION_IDS, fitLayout, type ActionId, type LayoutMetrics, type LayoutResult } from '../toolbar/layout';
-import { actionButton, focusButton, setActionState } from './controls';
+import { actionButton, focusButton, isImeKey, setActionState } from './controls';
 import { backState, expandedPanel, type NoteNotice, type PanelOrigin } from './panel-navigation';
 import { ToolbarPanels, type PanelGeometry } from './toolbar-panels';
 import type { Box } from './position';
@@ -20,6 +20,9 @@ export class Toolbar {
   private layoutKey = '';
   private spaceFeedback = false;
   private lastActionOrigin: PanelOrigin | null = null;
+  private composing = false;
+  private confirmingComposition = false;
+  private compositionTimer = 0;
 
   constructor(private readonly document: Document, private readonly t: Translate, private readonly actions: ToolbarActions) {
     this.root = document.body.createDiv({ cls: 'hover-bar-layer' }); this.root.hidden = true;
@@ -29,15 +32,28 @@ export class Toolbar {
     });
     this.measurements = this.root.createDiv({ cls: 'hover-bar-measurements', attr: { 'aria-hidden': 'true' } });
     this.measurements.inert = true;
-    const staging = document.createDocumentFragment();
     for (const id of [...ACTION_IDS, 'more'] as const) {
-      const button = actionButton(staging, id, t); button.addEventListener('click', () => this.activate(id, 'bar'));
+      const button = actionButton(this.bar, id, t); button.addEventListener('click', () => this.activate(id, 'bar'));
+      if (id !== 'more') button.remove();
       this.controls.set(id, button);
       const sample = actionButton(this.measurements, id, t);
       sample.removeAttribute('data-action'); sample.tabIndex = -1;
       this.samples.set(id, sample);
     }
-    this.bar.append(this.controls.get('more')!);
+    this.root.addEventListener('compositionstart', () => {
+      this.clearComposition();
+      this.composing = true;
+    });
+    this.root.addEventListener('compositionend', () => {
+      this.composing = false;
+      this.confirmingComposition = true;
+      const win = this.document.defaultView;
+      win?.clearTimeout(this.compositionTimer);
+      this.compositionTimer = win ? win.setTimeout(() => { this.confirmingComposition = false; this.compositionTimer = 0; }, 0) : 0;
+    });
+    this.root.addEventListener('focusout', () => {
+      queueMicrotask(() => { if (!this.ownsFocus()) this.clearComposition(); });
+    });
     this.root.addEventListener('pointerdown', event => {
       // Preserve the editor selection; the search input retains its native behavior.
       if (event.button === 0 && event.composedPath().some(node =>
@@ -74,9 +90,14 @@ export class Toolbar {
   contains(event: Event): boolean { return event.composedPath().includes(this.root); }
   escape(): void { this.back(); }
   ownsFocus(): boolean { return this.root.contains(this.document.activeElement); }
+  isComposing(): boolean { return this.composing || this.confirmingComposition; }
+  private clearComposition(): void {
+    this.composing = false; this.confirmingComposition = false;
+    this.document.defaultView?.clearTimeout(this.compositionTimer); this.compositionTimer = 0;
+  }
   get visible(): boolean { return !this.root.hidden; }
   takeSpaceFeedback(): boolean { const value = this.spaceFeedback; this.spaceFeedback = false; return value; }
-  hide(): void { this.panels.setState({ kind: 'none' }); this.spaceFeedback = false; this.lastActionOrigin = null; this.root.hidden = true; }
+  hide(): void { this.clearComposition(); this.panels.setState({ kind: 'none' }); this.spaceFeedback = false; this.lastActionOrigin = null; this.root.hidden = true; }
   destroy(): void { this.hide(); this.root.remove(); }
 
   private expanded(): void {
@@ -209,7 +230,7 @@ export class Toolbar {
     for (const button of items) button.tabIndex = button === selected ? 0 : -1;
   }
   private onKey(event: KeyboardEvent): void {
-    if (event.isComposing || event.keyCode === 229) return;
+    if (this.isComposing() || isImeKey(event)) return;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.back(); return; }
     if ((event.target as HTMLElement).tagName === 'INPUT') return;
     if (this.panels.root.contains(event.target as Node)) {

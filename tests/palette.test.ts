@@ -49,6 +49,37 @@ describe('custom color composition confirmation', () => {
     palette.input.dispatchEvent(new Event('blur')); key('keydown');
     expect(submit).toHaveBeenCalledExactlyOnceWith('foreground', '#aabbcc'); palette.dispose();
   });
+  it('ignores Process keys without relying on deprecated keyCode', () => {
+    const { palette, submit } = inputSetup();
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Process', isComposing: false });
+    palette.input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(submit).not.toHaveBeenCalled();
+    palette.dispose();
+  });
+  it('keeps a physical Enter reported as Process held through the next repeat', () => {
+    const { palette, submit, key } = inputSetup();
+    const process = (type: 'keydown' | 'keyup') => palette.input.dispatchEvent(Object.assign(
+      new Event(type, { cancelable: true }), { key: 'Process', code: 'Enter' }));
+    palette.input.dispatchEvent(new Event('compositionstart'));
+    expect(process('keydown')).toBe(true);
+    palette.input.dispatchEvent(new Event('compositionend'));
+    vi.runAllTimers();
+    key('keydown', false, true);
+    expect(submit).not.toHaveBeenCalled();
+    process('keyup'); key('keydown');
+    expect(submit).toHaveBeenCalledExactlyOnceWith('foreground', '#aabbcc');
+    palette.dispose();
+  });
+  it('clears composing and confirming flags when blur interrupts composition', () => {
+    const { palette, submit, key } = inputSetup();
+    palette.input.dispatchEvent(new Event('compositionstart'));
+    palette.input.dispatchEvent(new Event('compositionend'));
+    palette.input.dispatchEvent(new Event('blur'));
+    key('keydown');
+    expect(submit).toHaveBeenCalledExactlyOnceWith('foreground', '#aabbcc');
+    palette.dispose();
+  });
 });
 
 function setup(columns: number) {

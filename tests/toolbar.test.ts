@@ -111,6 +111,12 @@ describe('Toolbar DOM integration', () => {
       expect(await page.evaluate(() => window.toolbarTest.inspect())).toMatchObject({
         scope: { pushes: 1, pops: 0 }, text: 'before text after', selection: [7, 11],
       });
+      const retry = page.locator(panel).getByRole('button', { name: 'Retry', exact: true });
+      await page.keyboard.press('Tab'); await domExpect(retry).toBeFocused();
+      await page.keyboard.press('Enter'); await focused(input);
+      await domExpect(page.locator(input)).toHaveValue('Concept');
+      await domExpect(retry).toBeVisible();
+      await page.keyboard.press('Tab'); await domExpect(retry).toBeFocused();
       await page.keyboard.press('Tab'); await focused('#outside');
       await domExpect(page.locator('.hover-bar-layer')).toBeHidden();
       expect(await page.evaluate(() => window.toolbarTest.inspect().scope)).toEqual({ pushes: 1, pops: 1 });
@@ -367,6 +373,24 @@ describe('Toolbar DOM integration', () => {
     });
     expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toBe('before text after'); await focused('.hover-bar-hex');
     await page.keyboard.press('Enter'); expect(await page.evaluate(() => window.toolbarTest.inspect().text)).toContain('color:#aabbcc');
+  });
+
+  it('does not select a note when a physical Enter reported as Process auto-repeats', async () => {
+    await mount({ pinned: ['chooseNote'] }); await open('chooseNote', 'bar');
+    await page.locator(input).evaluate(async element => {
+      element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Process', code: 'Enter', isComposing: true, bubbles: true }));
+      element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true, bubbles: true }));
+    });
+    expect(await page.evaluate(() => window.toolbarTest.inspect().events)).toEqual([]);
+    await focused(input);
+    await page.locator(input).evaluate(element => {
+      element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Process', code: 'Enter', bubbles: true }));
+    });
+    await page.keyboard.press('Enter');
+    expect(await page.evaluate(() => window.toolbarTest.inspect().events)).toEqual([{ type: 'selectNote', action: 'Concept.md' }]);
   });
 
   it('continues text color, bold, background and text reset while history saves fail, then retries the latest history', async () => {
